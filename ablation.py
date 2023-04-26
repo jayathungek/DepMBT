@@ -122,10 +122,10 @@ def main():
 
     parser.add_argument('--net', '-n', default='mbt', help='Net name')
     parser.add_argument('--config', '-c', type=int, default=7, help='Config number')
-    parser.add_argument('--batch', '-b', type=int, default=16, help='Batch size')
+    parser.add_argument('--batch', '-b', type=int, default=2, help='Batch size')
     parser.add_argument('--rate', '-R', default='4', help='Rate')
     parser.add_argument('--project', '-p', default='minimal', help='projection type')
-    parser.add_argument('--epoch', '-e', type=int, default=10, help='Number of epoches')
+    parser.add_argument('--epoch', '-e', type=int, default=20, help='Number of epoches')
     parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
     parser.add_argument('--datadir', '-d', default='../../../Data/DVlog/', help='Data folder path')
     parser.add_argument('--sam', '-s', action='store_true', help='Apply SAM optimizer')

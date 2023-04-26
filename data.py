@@ -38,7 +38,7 @@ class DVlog(Dataset):
 
 
 def gen_dataset(rate, keep):
-    data_dir = '../../../Data/DVlog/'
+    data_dir = '/root/intelpa-2/datasets'
     feat_dir = os.path.join(data_dir, 'dvlog-dataset')
     label_file = os.path.join(feat_dir, 'labels.csv')
     label_index = {"depression": 1, "normal": 0}
