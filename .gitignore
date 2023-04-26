@@ -163,3 +163,4 @@ pretrained_models
 env_setup_done
 *.jpg
 results/
+imagenet_classes.txt
