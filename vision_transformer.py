@@ -154,6 +154,59 @@ class Block(nn.Module):
         return x
 
 
+class ResPostBlock(nn.Module):
+
+    def __init__(
+            self,
+            dim,
+            num_heads,
+            mlp_ratio=4.,
+            qkv_bias=False,
+            qk_norm=False,
+            drop=0.,
+            attn_drop=0.,
+            init_values=None,
+            drop_path=0.,
+            act_layer=nn.GELU,
+            norm_layer=nn.LayerNorm
+    ):
+        super().__init__()
+        self.init_values = init_values
+
+        self.attn = Attention(
+            dim,
+            num_heads=num_heads,
+            qkv_bias=qkv_bias,
+            qk_norm=qk_norm,
+            attn_drop=attn_drop,
+            proj_drop=drop,
+            norm_layer=norm_layer,
+        )
+        self.norm1 = norm_layer(dim)
+        self.drop_path1 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+
+        self.mlp = Mlp(
+            in_features=dim,
+            hidden_features=int(dim * mlp_ratio),
+            act_layer=act_layer,
+            drop=drop,
+        )
+        self.norm2 = norm_layer(dim)
+        self.drop_path2 = DropPath(drop_path) if drop_path > 0. else nn.Identity()
+
+        self.init_weights()
+
+    def init_weights(self):
+        # NOTE this init overrides that base model init with specific changes for the block type
+        if self.init_values is not None:
+            nn.init.constant_(self.norm1.weight, self.init_values)
+            nn.init.constant_(self.norm2.weight, self.init_values)
+
+    def forward(self, x):
+        x = x + self.drop_path1(self.norm1(self.attn(x)))
+        x = x + self.drop_path2(self.norm2(self.mlp(x)))
+        return x
+
 
 class VisionTransformer(nn.Module):
     """ Vision Transformer
@@ -169,8 +222,10 @@ class VisionTransformer(nn.Module):
             in_chans=3,
             num_classes=1000,
             global_pool='token',
+            # embed_dim=768,
             embed_dim=1024,
             depth=24,
+            # num_heads=12,
             num_heads=16,
             mlp_ratio=4.,
             qkv_bias=True,
@@ -322,9 +377,6 @@ class VisionTransformer(nn.Module):
                 x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
             x = x + self.pos_embed
         return self.pos_drop(x)
-
-    def new_forward_features(self, x):
-        return x
 
     def forward_features(self, x):
         x = self.patch_embed(x)
