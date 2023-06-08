@@ -6,8 +6,9 @@ from annotated_transformer import Encoder, EncoderLayer, clones, LayerNorm
 from layers import get_projection
 
 class MBT(nn.Module):
-    def __init__(self, v_dim, a_dim, embed_dim, num_bottle_token=4, bottle_layer=1
-                , project_type='minimal', num_head=4, drop=.1, num_layers=4, num_class=2):
+    # num_class=527
+    def __init__(self, a_dim, v_dim, embed_dim, num_bottle_token=4, bottle_layer=8
+                , project_type='minimal', num_head=4, drop=.1, num_layers=24, num_class=2):
         super().__init__()
         self.num_layers = num_layers
         self.bottle_layer = bottle_layer
@@ -73,6 +74,62 @@ class MBT(nn.Module):
 
             v = self.video_layers[i](v, mask)
             a = self.audio_layers[i](a, mask)
+
+            bot_token = (a[:, :self.num_bottle_token] + v[:, :self.num_bottle_token]) / 2
+            a = a[:, self.num_bottle_token:]
+            v = v[:, self.num_bottle_token:]
+
+        a = self.norma(a)
+        v = self.normv(v)
+        out = torch.cat((a[:, :1, :], v[:, :1, :]), dim=1)
+        out = self.head(out).mean(dim=1)
+
+        return out
+
+    def _forward(self, a, v):
+        '''
+            a : (batch_size, seq_len, a_dim)
+            v : (batch_size, seq_len, v_dim)
+        '''
+        B = a.shape[0]
+        if self.project_type_conv1d:
+            a = self.audio_prj(a.transpose(1, 2)).transpose(1, 2)
+            v = self.video_prj(v.transpose(1, 2)).transpose(1, 2)
+        else:
+            a = self.audio_prj(a)
+            v = self.video_prj(v)
+            a = a.flatten(2).transpose(1, 2)
+            v = v.flatten(2).transpose(1, 2)
+        a_m = torch.arange(B*a.shape[1]).reshape((B, a.shape[1])).cuda()
+        v_m = torch.arange(B*v.shape[1]).reshape((B, v.shape[1])).cuda()
+        
+        acls_tokens = self.acls_token.expand(B, -1, -1) 
+        a = torch.cat((acls_tokens, a), dim=1)
+        
+        vcls_tokens = self.vcls_token.expand(B, -1, -1)
+        v = torch.cat((vcls_tokens, v), dim=1)
+
+
+        a_mask_cls = self.mask_cls.expand(B, -1)
+        audio_mask = torch.cat((a_mask_cls, a_m), dim=1)
+        v_mask_cls = self.mask_cls.expand(B, -1)
+        video_mask = torch.cat((v_mask_cls, v_m), dim=1)
+
+        for i in range(self.bottle_layer):
+            v = self.video_layers[i](v, video_mask)
+            a = self.audio_layers[i](a, audio_mask)
+
+        mask_bot = self.mask_bot.expand(B, -1)
+        audio_mask = torch.cat((mask_bot, audio_mask), dim=1)
+        video_mask = torch.cat((mask_bot, video_mask), dim=1)
+        bot_token = self.bot_token.expand(B, -1, -1)
+
+        for i in range(self.bottle_layer, self.num_layers):
+            a = torch.cat((bot_token, a), dim=1)
+            v = torch.cat((bot_token, v), dim=1)
+
+            v = self.video_layers[i](v, video_mask)
+            a = self.audio_layers[i](a, audio_mask)
 
             bot_token = (a[:, :self.num_bottle_token] + v[:, :self.num_bottle_token]) / 2
             a = a[:, self.num_bottle_token:]

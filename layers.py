@@ -125,6 +125,8 @@ def get_projection(input_dim, output_dim, projection_type):
         return nn.Conv1d(input_dim, output_dim, kernel_size=1, padding=0, bias=False)
     if projection_type == 'gated':
         return GatedEmbeddingUnit(input_dim, output_dim)
+    if projection_type == 'conv2d':
+        return nn.Conv2d(input_dim, output_dim, kernel_size=16, stride=16, bias=True)
     elif projection_type == '':
         return nn.Identity()
     else:
