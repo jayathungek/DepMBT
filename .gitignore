@@ -163,6 +163,8 @@ pretrained_models
 env_setup_done
 *.jpg
 *.bmp
+*.png
 results/
 imagenet_classes.txt
 audioset_*.csv
+
