@@ -95,15 +95,17 @@ def val(net, validldr, criteria):
     all_y = None
     all_labels = None
     for batch_idx, data in enumerate(tqdm(validldr)):
-        feature_audio, feature_video, labels = data
+        # feature_audio, feature_video, labels = data
+        feature_audio, feature_video, mask, labels = data
         with torch.no_grad():
             feature_audio = feature_audio.cuda()
             feature_video = feature_video.cuda()
-            # mask = mask.cuda()
+            mask = mask.cuda()
             # labels = labels.float()
             labels = labels.cuda()
 
-            y = net(feature_audio, feature_video)
+            # y = net(feature_audio, feature_video)
+            y = net(feature_audio, feature_video, mask)
             loss = criteria(y, labels)
             total_losses.update(loss.data.item(), feature_audio.size(0))
 
@@ -126,6 +128,26 @@ def val(net, validldr, criteria):
     return (total_losses.avg(), f1, r, p, acc, cm)
 
 
+def test(model, args, description):
+    keep = 'k' if args.keep else ''
+    testset = DVlog('{}test_{}{}.pickle'.format(args.datadir, keep, args.rate))
+    # testset = EmoDataset(args.val_manifest)
+    loss_fn = nn.CrossEntropyLoss()
+    # testldr = DataLoader(testset, batch_size=args.batch, collate_fn=new_collate_fn, shuffle=False, num_workers=1)
+    testldr = DataLoader(testset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=1)
+
+    if not isinstance(model, nn.Module):
+        loaded = nn.DataParallel(MBT(25, 136, 256)).cuda()
+        # net = MBT(1*3, 10*3, 256, project_type=proj_type)
+        model = torch.load(model)
+        state_dict = model["state_dict"]
+        loaded.load_state_dict(state_dict)
+
+    eval_return = val(loaded, testldr, loss_fn)
+    print_eval_info(description, eval_return)
+
+
+
 def main():
     parser = argparse.ArgumentParser(description='Train task seperately')
 
@@ -144,6 +166,8 @@ def main():
     parser.add_argument('--keep', '-k', action='store_true', help='Keep all data in training set')
 
     args = parser.parse_args()
+    # test("results/mbt7_1/best_val_acc_0.72549.pth", args, "Best Val Acc: ")
+    # test("results/mbt7_1/best_val_f10.70989.pth", args, "Best Val F1: ")
     keep = 'k' if args.keep else ''
     output_dir = '{}{}_{}{}'.format(args.net, str(args.config), keep, args.rate)
 
@@ -194,22 +218,23 @@ def main():
 
         if val_f1 >= best_f1:
             checkpoint = {'state_dict': net.state_dict()}
-            torch.save(checkpoint, os.path.join('results', output_dir, 'best_val_f1.pth'))
+            torch.save(checkpoint, os.path.join('results', output_dir, f'best_val_f1{val_f1:.5f}.pth'))
             best_f1 = val_f1
             best_f1_model = deepcopy(net)
 
         if val_acc >= best_acc:
             checkpoint = {'state_dict': net.state_dict()}
-            torch.save(checkpoint, os.path.join('results', output_dir, 'best_val_acc.pth'))
+            torch.save(checkpoint, os.path.join('results', output_dir, f'best_val_acc_{val_acc:.5f}.pth'))
             best_acc = val_acc
             best_acc_model = deepcopy(net)
 
         df = append_entry_df(df, eval_return)
 
-    # testset = DVlog('{}test_{}{}.pickle'.format(args.datadir, keep, args.rate))
-    testset = EmoDataset(args.val_manifest)
+    testset = DVlog('{}test_{}{}.pickle'.format(args.datadir, keep, args.rate))
+    # testset = EmoDataset(args.val_manifest)
     test_criteria = nn.CrossEntropyLoss()
-    testldr = DataLoader(testset, batch_size=args.batch, collate_fn=new_collate_fn, shuffle=False, num_workers=1)
+    # testldr = DataLoader(testset, batch_size=args.batch, collate_fn=new_collate_fn, shuffle=False, num_workers=1)
+    testldr = DataLoader(testset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=1)
 
     best_f1_model = nn.DataParallel(best_f1_model).cuda()
     eval_return = val(best_f1_model, testldr, test_criteria)

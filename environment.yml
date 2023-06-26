@@ -1,4 +1,4 @@
-name: DepMBT
+name: depmbt 
 channels:
     - conda-forge
     - anaconda
@@ -11,7 +11,6 @@ dependencies:
       - git+https://github.com/huggingface/pytorch-image-models.git@cb3f9c23bb31d234609711f06835724a8f0ee7da
       - ffmpeg-python==0.2.0
       - pip-chill==1.0.1
-      - torchvision==0.11.0 # --no-deps
       - yt-dlp==2022.9.1
       - librosa==0.9.2
       - Pillow

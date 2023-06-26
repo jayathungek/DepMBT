@@ -1,4 +1,5 @@
 import csv
+import pandas as pd
 import sys
 from pathlib import Path
 from typing import List
@@ -40,7 +41,32 @@ def get_manifest_lines(f_manifest, valid_file_ids):
 
     return lines
 
+def append_cols_right(file1, file1_header, file2, file2_header, data_dir, outfile):
+    """
+    Appends the columns of file2 to the columns of file1
+    """
+    df1 = pd.read_csv(file1, names=file1_header)
+    df2 = pd.read_csv(file2, names=file2_header)
+    assert df1.shape[1] == len(file1_header), "Mismatch of column count and header name count in file 1"
+    assert df2.shape[1] == len(file2_header), "Mismatch of column count and header name count in file 2"
+    assert df1.shape[0] == df2.shape[0], "Mismatch of number of rows between file 1 and 2"
+    joined = pd.concat([df1, df2], axis=1)
+    joined['filename'] = joined['filename'].map(lambda s: str(data_dir / s.replace("'", "")))
+    joined.to_csv(outfile, index=False)
+    
+
+
 if __name__ == '__main__':
+    BASE_DIR = "/root/intelpa-1/datasets/EmoReact/EmoReact_V_1.0"
+    f1 = Path(BASE_DIR) / "Labels" / sys.argv[1]
+    f2 = Path(BASE_DIR) / "Labels" / sys.argv[2]
+    o  = Path(BASE_DIR) / "Labels" / sys.argv[3]
+    append_cols_right(f1, ["filename"], 
+                      f2, ["Curiosity", "Uncertainty", "Excitement", "Happiness", "Surprise", "Disgust", "Fear", "Frustration", "Valence"],
+                      Path(BASE_DIR) / "Data/Validation",
+                      o,
+                      )
+    exit()
     IN_DIR = Path(sys.argv[1]).resolve()
     outfile = Path(sys.argv[2]).resolve()
     index_mappings = Path(sys.argv[3]).resolve()

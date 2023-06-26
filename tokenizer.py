@@ -152,12 +152,12 @@ def get_spectrogram(video_path: str, sampling_rate: int) -> io.BytesIO:
 
 
 RGB_TRANSFORM = transforms.Compose([
-    transforms.Resize((224, 224)),
+    transforms.Resize((WIDTH, HEIGHT)),
     transforms.PILToTensor()
 ])
 
 SPEC_TRANSFORM = transforms.Compose([
-    transforms.Resize((128, 800)),
+    transforms.Resize((WIDTH, HEIGHT)),
     transforms.PILToTensor()
 ])
 
@@ -166,7 +166,7 @@ def make_rgb_input(file: str) -> np.ndarray:
     frames = get_rgb_frames(file, ensure_frames_len=FRAMES)
     tensor_frames = [
         RGB_TRANSFORM(
-            Image.open(io.BytesIO(vid_frame))
+            Image.open(io.BytesIO(vid_frame))            
         ) for vid_frame in frames]
     # .permute(2, 1, 0)
     if DEBUG:

@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from math import cos, pi
 from sklearn.metrics import f1_score
+from torchmetrics.classification import MultilabelPrecision, MultilabelRecall, MultilabelAveragePrecision, MultilabelF1Score
 
 EPS = 1e-8
 
@@ -228,3 +229,53 @@ def print_eval_info(description, eval_return):
                     val_matrix[0][1],
                     val_matrix[1][0],
                     val_matrix[1][1]))
+
+
+def logits_to_labels(logits, threshold=0.5):
+    return torch.where(logits > threshold, 1.0, 0.0)
+
+
+class ClassifierMetrics(object):
+    ap: float
+    precision: float
+    recall: float
+    f1: float
+    count: int
+
+    def __init__(self, n_labels, device):
+        self.ap_metric = MultilabelAveragePrecision(num_labels=n_labels, average=None, thresholds=None).to(device)
+        self.precision_metric = MultilabelPrecision(num_labels=n_labels).to(device)
+        self.recall_metric = MultilabelRecall(num_labels=n_labels).to(device)
+        self.f1_metric = MultilabelF1Score(num_labels=n_labels).to(device)
+        self.count = 0
+        self.reset()
+    
+    def reset(self):
+        self.ap = 0
+        self.precision = 0
+        self.recall = 0
+        self.f1 = 0
+        self.count = 0
+
+    def update(self, y_pred, y):
+        y = y.long()
+        self.ap += self.ap_metric(y_pred, y)
+        self.precision += self.precision_metric(y_pred, y)
+        self.recall += self.recall_metric(y_pred, y)
+        self.f1 += self.f1_metric(y_pred, y)
+        self.count += y.size(0)
+
+    def calc(self, y_pred, y):
+        self.reset()
+        y = y.long()
+        self.ap = self.ap_metric(y_pred, y)
+        self.precision = self.precision_metric(y_pred, y)
+        self.recall = self.recall_metric(y_pred, y)
+        self.f1 = self.f1_metric(y_pred, y)
+
+    def avg(self):
+        self.ap = self.ap / self.count
+        self.precision = self.precision / self.count
+        self.recall = self.recall / self.count
+        self.f1 = self.f1 / self.count
+        

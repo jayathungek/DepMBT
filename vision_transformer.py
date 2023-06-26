@@ -378,15 +378,18 @@ class VisionTransformer(nn.Module):
             x = x + self.pos_embed
         return self.pos_drop(x)
 
-    def forward_features(self, x):
+    def embed_project(self, x):
         x = self.patch_embed(x)
         x = self._pos_embed(x)
         x = self.norm_pre(x)
+        return x
+
+    def forward_features(self, x):
+        # x = self.embed_project(x)
         if self.grad_checkpointing and not torch.jit.is_scripting():
             x = checkpoint_seq(self.blocks, x)
         else:
             x = self.blocks(x)
-        x = self.norm(x)
         return x
 
     def forward_head(self, x, pre_logits: bool = False):
@@ -397,6 +400,7 @@ class VisionTransformer(nn.Module):
 
     def forward(self, x):
         x = self.forward_features(x)
+        # x = self.norm(x)
         x = self.forward_head(x)
         return x
 
@@ -715,14 +719,15 @@ if __name__ == '__main__':
     from timm.data.transforms_factory import create_transform
     from timm.data import resolve_data_config
 
-    pretrained_path = "./pretrained_models/L_16-i21k-300ep-lr_0.001-aug_medium1-wd_0.1-do_0.1-sd_0.1.npz"
+    pretrained_path = "./pretrained_models/L_16-i21k-300ep-lr_0.001-aug_medium1-wd_0.1-do_0.1-sd_0.1--imagenet2012-steps_20k-lr_0.01-res_224.npz"
     # pretrained_url = "https://storage.googleapis.com/vit_models/augreg/L_16-i21k-300ep-lr_0.001-aug_medium1-wd_0.1-do_0.1-sd_0.1.npz"
-    pretrained_url = "https://storage.googleapis.com/vit_models/augreg/L_16-i21k-300ep-lr_0.001-aug_medium1-wd_0.1-do_0.1-sd_0.1--imagenet2012-steps_20k-lr_0.01-res_224.npz"
-    config = _cfg(url=pretrained_url, custom_load=True)
+    # pretrained_url = "https://storage.googleapis.com/vit_models/augreg/L_16-i21k-300ep-lr_0.001-aug_medium1-wd_0.1-do_0.1-sd_0.1--imagenet2012-steps_20k-lr_0.01-res_224.npz"
+    config = _cfg(url=pretrained_path, custom_load=True)
     model = _create_vision_transformer('vit_large_patch16_224', pretrained=True, pretrained_cfg=config)
     img = Image.open("dog.jpg").convert('RGB')
 
     config = resolve_data_config({}, model=model)
+    print(config)
     transform = create_transform(**config)
     tensor = transform(img).unsqueeze(0)  # transform and add batch dimension
     with torch.no_grad():

@@ -7,8 +7,8 @@ from layers import get_projection
 
 class MBT(nn.Module):
     # num_class=527
-    def __init__(self, a_dim, v_dim, embed_dim, num_bottle_token=4, bottle_layer=8
-                , project_type='minimal', num_head=4, drop=.1, num_layers=24, num_class=2):
+    def __init__(self, a_dim, v_dim, embed_dim, num_bottle_token=4, bottle_layer=7
+                , project_type='minimal', num_head=4, drop=.1, num_layers=10, num_class=2):
         super().__init__()
         self.num_layers = num_layers
         self.bottle_layer = bottle_layer

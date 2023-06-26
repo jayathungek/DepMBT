@@ -5,29 +5,32 @@ import torch
 import pickle
 import numpy as np
 from tqdm import tqdm
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 
 from tokenizer import make_input
 
 FRAMES = 10
+NUM_LABELS = 8
 CHANS = 3
 WIDTH = HEIGHT = 224
+
 SPEC_WIDTH = 800
 SPEC_HEIGHT = 128
 SAMPLING_RATE = 44100
+DATA_DIR = "/root/intelpa-1/datasets/EmoReact/EmoReact_V_1.0"
 
 
 class EmoDataset(Dataset):
-    def __init__(self, manifest_filepath):
+    def __init__(self, manifest_filepath, nlines):
         super(EmoDataset, self).__init__()
-        self.dataset = pd.read_csv(manifest_filepath)
+        self.dataset = pd.read_csv(manifest_filepath, nrows=nlines)
 
     def __len__(self):
         return len(self.dataset)
 
     def __getitem__(self, item):
-        return self.dataset.iloc[item][0], self.dataset.iloc[item][1]
+        return self.dataset.iloc[item][0], [self.dataset.iloc[item][i] for i in range(1, NUM_LABELS + 1)]
 
 
 class DVlog(Dataset):
@@ -61,7 +64,7 @@ def collate_fn(data):
 
 def new_collate_fn(batch):
     rgb_batch_tensor = torch.FloatTensor(len(batch), FRAMES * CHANS, HEIGHT, WIDTH)
-    spec_batch_tensor = torch.FloatTensor(len(batch), CHANS, SPEC_HEIGHT, SPEC_WIDTH)
+    spec_batch_tensor = torch.FloatTensor(len(batch), CHANS, HEIGHT, WIDTH)
     rgb_tensor_list = []
     spec_tensor_list = []
     labels_list = []
@@ -71,6 +74,7 @@ def new_collate_fn(batch):
             rgb, spec = make_input(filename, SAMPLING_RATE)
             rgb = rgb.reshape((CHANS * FRAMES, HEIGHT, WIDTH)).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
             spec = spec.unsqueeze(0)                                         # c, h, w -> 1, c, h, w
+            label = torch.tensor(label, dtype=torch.long)
             rgb_tensor_list.append(rgb)
             spec_tensor_list.append(spec)
             labels_list.append(label)
@@ -87,11 +91,11 @@ def new_collate_fn(batch):
 
     torch.cat(rgb_tensor_list, out=rgb_batch_tensor)
     torch.cat(spec_tensor_list, out=spec_batch_tensor)
-    label_batch_tensor = torch.LongTensor(labels_list)
+    label_batch_tensor = torch.vstack(labels_list)
     # Don't need a mask as long as all items in the batch are guaranteed to be the same length in the time dim
     # audio_mask = torch.arange(len(batch)*SPEC_WIDTH).reshape((len(batch), SPEC_WIDTH))
     # video_mask = torch.arange(len(batch)*WIDTH).reshape((len(batch), WIDTH))
-    return spec_batch_tensor.float(),rgb_batch_tensor.float(), label_batch_tensor.long()
+    return spec_batch_tensor, rgb_batch_tensor, label_batch_tensor.float()
 
 
 
@@ -133,9 +137,13 @@ def gen_dataset(rate, keep):
             pickle.dump(dataset[fold], handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__=="__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description='Generate dataset')
-    parser.add_argument('--rate', '-r', type=int, default=1, help='Downsample rate')
-    parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')
-    args = parser.parse_args()
-    gen_dataset(args.rate, args.keep)
+    # import argparse
+    # parser = argparse.ArgumentParser(description='Generate dataset')
+    # parser.add_argument('--rate', '-r', type=int, default=1, help='Downsample rate')
+    # parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')
+    # args = parser.parse_args()
+    # gen_dataset(args.rate, args.keep)
+    ds = EmoDataset("/root/intelpa-1/datasets/EmoReact/EmoReact_V_1.0/Labels/train_labels_full.txt")
+    dl = DataLoader(ds, collate_fn=new_collate_fn, shuffle=True)
+    for audio, visual, label in dl:
+        print(audio.shape, visual.shape, label)
