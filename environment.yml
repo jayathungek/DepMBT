@@ -9,6 +9,7 @@ dependencies:
     - pip:
       - https://download.pytorch.org/whl/cu113/torch-1.10.0%2Bcu113-cp39-cp39-linux_x86_64.whl
       - git+https://github.com/huggingface/pytorch-image-models.git@cb3f9c23bb31d234609711f06835724a8f0ee7da
+      - facenet-pytorch==2.5.3
       - ffmpeg-python==0.2.0
       - pip-chill==1.0.1
       - yt-dlp==2022.9.1
