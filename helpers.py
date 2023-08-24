@@ -7,7 +7,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from math import cos, pi
 from sklearn.metrics import f1_score
-from torchmetrics.classification import MultilabelPrecision, MultilabelRecall, MultilabelAveragePrecision, MultilabelF1Score
+import torchmetrics.classification as tmcls 
+import matplotlib as mblib
+import matplotlib.pyplot as plt
 
 EPS = 1e-8
 
@@ -242,14 +244,24 @@ class ClassifierMetrics(object):
     f1: float
     count: int
 
-    def __init__(self, n_labels, device):
-        self.ap_metric = MultilabelAveragePrecision(num_labels=n_labels, average=None, thresholds=None).to(device)
-        self.precision_metric = MultilabelPrecision(num_labels=n_labels).to(device)
-        self.recall_metric = MultilabelRecall(num_labels=n_labels).to(device)
-        self.f1_metric = MultilabelF1Score(num_labels=n_labels).to(device)
-        self.count = 0
+    def __init__(self, task, n_labels, device):
+        self.task = task
+        if self.task == "multiclass":
+            self.ap_metric = tmcls.MulticlassAveragePrecision(task=self.task, num_classes=n_labels, average=None, thresholds=None).to(device)
+            self.precision_metric = tmcls.MulticlassPrecision(task=self.task, num_classes=n_labels).to(device)
+            self.recall_metric = tmcls.MulticlassRecall(task=self.task, num_classes=n_labels).to(device)
+            self.f1_metric = tmcls.MulticlassF1Score(task=self.task, num_classes=n_labels).to(device)
+            self.acc_metric = tmcls.MulticlassAccuracy(task=self.task, num_classes=n_labels).to(device)
+
+        elif self.task == "multilabel":
+            self.ap_metric = tmcls.MultilabelAveragePrecision(num_labels=n_labels, average=None, thresholds=None).to(device)
+            self.precision_metric = tmcls.MultilabelPrecision(num_labels=n_labels).to(device)
+            self.recall_metric = tmcls.MultilabelRecall(num_labels=n_labels).to(device)
+            self.f1_metric = tmcls.MultilabelF1Score(num_labels=n_labels).to(device)
+            self.acc_metric = tmcls.MultilabelAccuracy(task=self.task, num_labels=n_labels).to(device)
         self.reset()
     
+
     def reset(self):
         self.ap = 0
         self.precision = 0
@@ -279,3 +291,40 @@ class ClassifierMetrics(object):
         self.recall = self.recall / self.count
         self.f1 = self.f1 / self.count
         
+
+
+def display_tensor_as_rgb(tensor, title=None):
+    tensor = tensor.cpu().detach().numpy()
+    t_y = tensor.shape[0]
+    t_x = tensor.shape[1]
+
+    cur_aspect_ratio = t_y/t_x
+    if cur_aspect_ratio <= 1:
+        aspect = 1/cur_aspect_ratio
+    else:
+        aspect = cur_aspect_ratio
+    plt.figure(frameon=False)
+    plt.title(title if title else '')
+    plt.tick_params(bottom=False, top=False, left=False, right=False, labelbottom=False, labelleft=False)
+
+    plt.imshow(tensor, aspect=aspect)
+    plt.colorbar()
+    plt.show()
+
+
+
+def is_jupyter():
+    try:
+        from IPython import get_ipython
+        ip = get_ipython()
+        if ip is None:
+            # we have IPython installed but not running from IPython
+            return False
+        else:
+            return True
+    except:
+        # We do not even have IPython installed
+        return False
+
+if __name__ == "__main__":
+    print(is_jupyter())

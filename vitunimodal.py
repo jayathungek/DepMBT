@@ -140,67 +140,50 @@ class PretrainedViT(nn.Module):
 
 
 class ViTMBT(nn.Module):
-    def __init__(self, embed_dim, num_bottle_token=4, bottle_layer=24
-                , project_type='conv2d', num_head=4, drop=.1, num_layers=30, num_class=8):
+    def __init__(self, embed_dim, num_bottle_token=4, bottle_layer=24, mode='audio', project_type='conv2d', num_head=4, drop=.1, num_layers=30, num_class=8):
         super().__init__()
         self.num_class = num_class
-        self.num_modalities = 2
+        self.num_modalities = 1
         self.num_layers = num_layers
         self.bottle_layer = bottle_layer
         self.num_bottle_token = num_bottle_token
         self.num_multimodal_layers = num_layers - bottle_layer
         # make vision transformer layers be accessible via subscript
-        self.unimodal_audio = PretrainedViT(PRETRAINED_CHKPT, 8, 3, "audio layers")
-        self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, 24, 3 * FRAMES, "video layers")
-        self.multimodal_audio = clones(Block(embed_dim, num_head), self.num_multimodal_layers)
-        self.multimodal_video = clones(Block(embed_dim, num_head), self.num_multimodal_layers)
-        self.bottleneck_token = nn.Parameter(torch.zeros(1, num_bottle_token, embed_dim))
-        self.acls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.vcls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        if mode == 'audio':
+            self.unimodal_stack = PretrainedViT(PRETRAINED_CHKPT, 8, 3, "audio layers")
+        elif mode == 'video':
+            self.unimodal_stack = PretrainedViT(PRETRAINED_CHKPT, 24, 3 * FRAMES, "video layers")
+
+        self.multimodal_stack = clones(Block(embed_dim, num_head), self.num_multimodal_layers)
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        # self.bottleneck_token = nn.Parameter(torch.zeros(1, num_bottle_token, embed_dim))
         self.head = nn.Linear(self.num_modalities * embed_dim, num_class) # there are 2 modalities, each with embed_dim features
         self.softmax = nn.Softmax()
 
 
-    def forward(self, a, v):
-        B = a.shape[0] # Batch size
-        a = self.unimodal_audio.model.embed_project(a)
-        v = self.unimodal_video.model.embed_project(v)
+    def forward(self, x):
+        B = x.shape[0] # Batch size
+        a = self.unimodal_stack.model.embed_project(x)
 
-        acls_tokens = self.acls_token.expand(B, -1, -1)
-        a = torch.cat((acls_tokens, a), dim=1)
-        
-        vcls_tokens = self.vcls_token.expand(B, -1, -1)
-        v = torch.cat((vcls_tokens, v), dim=1)
+        cls_tokens = self.cls_token.expand(B, -1, -1)
+        x = torch.cat((cls_tokens, x), dim=1)
 
-        a = self.unimodal_audio.model.forward_features(a)
-        v = self.unimodal_video.model.forward_features(v)
+        x = self.unimodal_stack.model.forward_features(x)
 
-
-        bottleneck_token = self.bottleneck_token.expand(B, -1, -1)
 
         for i in range(self.num_multimodal_layers):
-            a = torch.cat((bottleneck_token, a), dim=1)
-            v = torch.cat((bottleneck_token, v), dim=1)
+            x  = self.multimodal_audio[i](x)
 
-            a  = self.multimodal_audio[i](a)
-            v  = self.multimodal_video[i](v)
-
-            bottleneck_token = (a[:, :self.num_bottle_token] + v[:, :self.num_bottle_token]) / 2
-            a = a[:, self.num_bottle_token:]
-            v = v[:, self.num_bottle_token:]
-
-
-        out = torch.cat((a[:, :1, :], v[:, :1, :]), dim=1) # concatenating the classification tokens
-        # out = v[:, :1, :]
+        out = x[:, :1, :]
         out = out.flatten(start_dim=1, end_dim=2)
         out = self.head(out)
         out = out.reshape(B, 1, self.num_class)
         out = self.softmax(out)
-        return out, bottleneck_token
+        return out
 
 def toy_test(model):
     config = {
-        'input_size': (3, 224, 224), 
+        'input_size': (30, 224, 224), 
         'interpolation': 'bicubic',
         'mean': (0.5, 0.5, 0.5), 
         'std': (0.5, 0.5, 0.5),
@@ -208,9 +191,9 @@ def toy_test(model):
     }
     transform = create_transform(**config)
     img = Image.open("dog.jpg").convert('RGB')
-    audio_batch = transform(img).unsqueeze(0)  
     video_batch = transform(img).unsqueeze(0)  
-    output = model(audio_batch, video_batch)
+    video_batch = video_batch.repeat(1, 10, 1, 1)
+    output = model(video_batch)
 
 
 
@@ -222,34 +205,45 @@ def train(net, trainldr, optimizer, loss_fn, cls_metrics):
     all_y = None
     all_labels = None
     for batch_idx, data in enumerate(tqdm(trainldr)):
-        audio, video, labels = data
-        audio = audio.to(DEVICE)
-        video = video.to(DEVICE)
+        # audio, video, labels = data
+        audio, labels = data
+        if net.mode == "audio":
+            x = audio
+        elif net.mode == "video":
+            x = video
+        
+        # x = torch.rand_like(x)
+        x = x.to(DEVICE)
         labels = labels.float()
         labels = labels.to(DEVICE)
         optimizer.zero_grad()
-        # y = net(feature_audio, feature_video)
-        y, bot_token = net(audio, video)
+        y = net(x)
         loss = loss_fn(y, labels)
+        cls_metrics.update(y, labels)
         loss.backward()
         optimizer.step()
-        total_losses.update(loss.data.item(), audio.size(0))
+        if net.mode == "audio":
+            total_losses.update(loss.data.item(), audio.size(0))
+        elif net.mode == "video":
+            total_losses.update(loss.data.item(), video.size(0))
 
-        if all_y == None:
-            all_y = y.clone()
-            all_labels = labels.clone()
-        else:
-            all_y = torch.cat((all_y, y), 0)
-            all_labels = torch.cat((all_labels, labels), 0)
 
-    all_y = all_y.squeeze(1).cpu().detach().numpy()
-    all_labels = all_labels.squeeze(1).cpu().detach().numpy()
-    all_labels, all_y = transform(all_labels, all_y)
-    f1 = f1_score(all_labels, all_y, average='weighted')
-    r = recall_score(all_labels, all_y, average='weighted')
-    p = precision_score(all_labels, all_y, average='weighted')
-    acc = accuracy_score(all_labels, all_y)
-    return total_losses.avg(), f1, r, p, acc, bot_token
+        # if all_y == None:
+        #     all_y = y.clone()
+        #     all_labels = labels.clone()
+        # else:
+        #     all_y = torch.cat((all_y, y), 0)
+        #     all_labels = torch.cat((all_labels, labels), 0)
+
+    cls_metrics.avg()
+    # all_y = all_y.squeeze(1).cpu().detach().numpy()
+    # all_labels = all_labels.squeeze(1).cpu().detach().numpy()
+    # all_labels, all_y = transform(all_labels, all_y)
+    # f1 = f1_score(all_labels, all_y, average='weighted')
+    # r = recall_score(all_labels, all_y, average='weighted')
+    # p = precision_score(all_labels, all_y, average='weighted')
+    # acc = accuracy_score(all_labels, all_y)
+    return total_losses.avg(), cls_metrics
 
 def val(net, valldr, loss_fn, cls_metrics):
     total_losses = AverageMeter()
@@ -258,46 +252,55 @@ def val(net, valldr, loss_fn, cls_metrics):
     all_labels = None
     with torch.no_grad():
         for batch_idx, data in enumerate(tqdm(valldr)):
-            audio, video, labels = data
-            audio = torch.rand_like(audio)
-            video = torch.rand_like(video)
-            audio = audio.to(DEVICE)
-            video = video.to(DEVICE)
+            # audio, video, labels = data
+            audio, labels = data
+            if net.mode == "audio":
+                x = audio
+            elif net.mode == "video":
+                x = video
+            
+            # x = torch.rand_like(x)
+            x = x.to(DEVICE)
             labels = labels.float()
             labels = labels.to(DEVICE)
 
             # y = net(feature_audio, feature_video)
-            y, bot_token = net(audio, video)
+            y = net(audio)
             loss = loss_fn(y, labels)
 
-            # cls_metrics.calc(y, labels)
-            # cls_metrics.update(y, labels)
-            total_losses.update(loss.data.item(), audio.size(0))
+            cls_metrics.update(y, labels)
+            if net.mode == "audio":
+                total_losses.update(loss.data.item(), audio.size(0))
+            elif net.mode == "video":
+                total_losses.update(loss.data.item(), video.size(0))
 
-            if all_y == None:
-                all_y = y.clone()
-                all_labels = labels.clone()
-            else:
-                all_y = torch.cat((all_y, y), 0)
-                all_labels = torch.cat((all_labels, labels), 0)
-    # cls_metrics.avg()
-    all_y = all_y.squeeze(1).cpu().detach().numpy()
-    all_labels = all_labels.squeeze(1).cpu().detach().numpy()
-    all_labels, all_y = transform(all_labels, all_y)
-    f1 = f1_score(all_labels, all_y, average='weighted')
-    r = recall_score(all_labels, all_y, average='weighted')
-    p = precision_score(all_labels, all_y, average='weighted')
-    acc = accuracy_score(all_labels, all_y)
-    return total_losses.avg(), f1, r, p, acc, bot_token
+            # if all_y == None:
+            #     all_y = y.clone()
+            #     all_labels = labels.clone()
+            # else:
+            #     all_y = torch.cat((all_y, y), 0)
+            #     all_labels = torch.cat((all_labels, labels), 0)
+    cls_metrics.avg()
+    # all_y = all_y.squeeze(1).cpu().detach().numpy()
+    # all_labels = all_labels.squeeze(1).cpu().detach().numpy()
+    # all_labels, all_y = transform(all_labels, all_y)
+    # f1 = f1_score(all_labels, all_y, average='weighted')
+    # r = recall_score(all_labels, all_y, average='weighted')
+    # p = precision_score(all_labels, all_y, average='weighted')
+    # acc = accuracy_score(all_labels, all_y)
+    return total_losses.avg(), cls_metrics
 
             
 if __name__ == "__main__":
+    
     EPOCHS = 200
     lr = 0.001
     BATCH_SZ = 8
     LABELS = 1
     vmbt = ViTMBT(1024, num_class=LABELS)
     vmbt = nn.DataParallel(vmbt).cuda()
+    toy_test(vmbt)
+    exit()
     train_ds = EmoDataset(f"{DATA_DIR}/Labels/train_labels_full_pruned.csv", nlines=None, sole_emotion=None) # emotion #4 scores very high
     val_ds = EmoDataset(f"{DATA_DIR}/Labels/val_labels_full_pruned.csv", nlines=50, sole_emotion=None)
     test_ds = EmoDataset(f"{DATA_DIR}/Labels/test_labels_full_pruned.csv", nlines=None, sole_emotion=None)

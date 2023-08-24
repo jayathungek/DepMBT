@@ -5,6 +5,7 @@ from timm.models.layers import trunc_normal_
 from annotated_transformer import Encoder, EncoderLayer, clones, LayerNorm
 from layers import get_projection
 
+
 class MBT(nn.Module):
     # num_class=527
     def __init__(self, a_dim, v_dim, embed_dim, num_bottle_token=4, bottle_layer=7
@@ -84,7 +85,7 @@ class MBT(nn.Module):
         out = torch.cat((a[:, :1, :], v[:, :1, :]), dim=1)
         out = self.head(out).mean(dim=1)
 
-        return out
+        return out, bot_token
 
     def _forward(self, a, v):
         '''

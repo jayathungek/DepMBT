@@ -4,7 +4,6 @@ import os
 import torch
 import pandas
 import argparse
-from tqdm import tqdm
 from data import DVlog, collate_fn, EmoDataset, new_collate_fn
 from sam import SAM
 from helpers import *
@@ -13,33 +12,11 @@ from models import AblationModel
 from torch.utils.data import DataLoader
 from sklearn.metrics import recall_score, precision_score, accuracy_score, confusion_matrix
 
-
-
-def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
-    total_losses = AverageMeter()
-    net.train()
-    train_loader_len = len(trainldr)
-    for batch_idx, data in enumerate(tqdm(trainldr)):
-        # feature_audio, feature_video, labels = data
-        feature_audio, feature_video, mask, labels = data
-
-        # adjust_learning_rate(optimizer, epoch, epochs, learning_rate, batch_idx, train_loader_len)
-        feature_audio = feature_audio.cuda()
-        feature_video = feature_video.cuda()
-        labels = labels.cuda()
-        mask = mask.cuda()
-        # audio_mask = audio_mask.cuda()
-        # video_mask = video_mask.cuda()
-        optimizer.zero_grad()
-
-        # y = net(feature_audio, feature_video)
-        y = net(feature_audio, feature_video, mask)
-        loss = criteria(y, labels)
-        loss.backward()
-        optimizer.step()
-
-        total_losses.update(loss.data.item(), feature_audio.size(0))
-    return total_losses.avg()
+from helpers import is_jupyter
+if is_jupyter():
+    from tqdm.notebook import tqdm
+else:
+    from tqdm import tqdm
 
 
 def train_sam(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
@@ -89,6 +66,30 @@ def transform(y, yhat):
     return y, yhat
 
 
+def train(net, trainldr, optimizer, epoch, epochs, learning_rate, criteria):
+    total_losses = AverageMeter()
+    net.train()
+    train_loader_len = len(trainldr)
+    for batch_idx, data in enumerate(tqdm(trainldr)):
+        # feature_audio, feature_video, labels = data
+        feature_audio, feature_video, mask, labels = data
+
+        # adjust_learning_rate(optimizer, epoch, epochs, learning_rate, batch_idx, train_loader_len)
+        feature_audio = feature_audio.cuda()
+        feature_video = feature_video.cuda()
+        labels = labels.cuda()
+        mask = mask.cuda()
+        optimizer.zero_grad()
+
+        y, bot_token = net(feature_audio, feature_video, mask)
+        loss = criteria(y, labels)
+        loss.backward()
+        optimizer.step()
+
+        total_losses.update(loss.data.item(), feature_audio.size(0))
+    return total_losses.avg(), bot_token
+
+
 def val(net, validldr, criteria):
     total_losses = AverageMeter()
     net.eval()
@@ -105,7 +106,7 @@ def val(net, validldr, criteria):
             labels = labels.cuda()
 
             # y = net(feature_audio, feature_video)
-            y = net(feature_audio, feature_video, mask)
+            y, bot_token = net(feature_audio, feature_video, mask)
             loss = criteria(y, labels)
             total_losses.update(loss.data.item(), feature_audio.size(0))
 
@@ -125,7 +126,7 @@ def val(net, validldr, criteria):
     p = precision_score(all_labels, all_y, average='weighted')
     acc = accuracy_score(all_labels, all_y)
     cm = confusion_matrix(all_labels, all_y)
-    return (total_losses.avg(), f1, r, p, acc, cm)
+    return (total_losses.avg(), f1, r, p, acc, cm, bot_token)
 
 
 def test(model, args, description):
@@ -156,7 +157,7 @@ def main():
     parser.add_argument('--batch', '-b', type=int, default=2, help='Batch size')
     parser.add_argument('--rate', '-R', default='4', help='Rate')
     parser.add_argument('--project', '-p', default='minimal', help='projection type')
-    parser.add_argument('--epoch', '-e', type=int, default=20, help='Number of epoches')
+    parser.add_argument('--epoch', '-e', type=int, default=100, help='Number of epoches')
     parser.add_argument('--lr', '-a', type=float, default=0.00001, help='Learning rate')
     parser.add_argument('--datadir', '-d', default='../../../Data/DVlog/', help='Data folder path')
     parser.add_argument('--train_manifest', '-t', default='audioset_less_train_manifest.csv', help='CSV file containing train manifest')

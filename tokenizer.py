@@ -16,10 +16,13 @@ from PIL import Image
 
 from timm.layers.format import Format, nchw_to
 from timm.layers.helpers import to_2tuple
+from face import CropFace
+
 
 DEBUG = False
 FRAMES = 10
 CHANS = 3
+FACE_MARGIN = 60
 WIDTH = HEIGHT = 224
 SPEC_WIDTH = 800
 SPEC_HEIGHT = 128
@@ -152,8 +155,7 @@ def get_spectrogram(video_path: str, sampling_rate: int) -> io.BytesIO:
 
 
 RGB_TRANSFORM = transforms.Compose([
-    transforms.Resize((WIDTH, HEIGHT)),
-    transforms.PILToTensor()
+    CropFace(size=WIDTH, margin=FACE_MARGIN)
 ])
 
 SPEC_TRANSFORM = transforms.Compose([
@@ -213,13 +215,14 @@ def prune_manifest(manifest_filepath):
     manifest_filepath = Path(manifest_filepath).resolve()
     with open(manifest_filepath, "r") as fh:
         reader = csv.reader(fh)
-        for filepath, label in tqdm(reader):
+        for row in tqdm(reader):
+            filepath, _, _, _, _, _, _, _, _, _ = row
             filepath = Path(filepath).resolve()
             try:
                 rgb, spec = make_input(filepath, SAMPLING_RATE)
                 rgb = rgb.reshape((CHANS * FRAMES, HEIGHT, WIDTH)).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
                 spec = spec.unsqueeze(0)
-                ok_lines.append([str(filepath), label])
+                ok_lines.append([row])
             except Exception as e:
                 print(f"Failed to process {filepath.name}: {e}")
                 failed += 1
