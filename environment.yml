@@ -22,3 +22,5 @@ dependencies:
       - pandas
       - torchsummary
       - matplotlib
+      - ipywidgets
+      - lightning_utilities
