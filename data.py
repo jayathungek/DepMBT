@@ -5,7 +5,7 @@ import torch
 import pickle
 import numpy as np
 from tqdm import tqdm
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from torch.nn.utils.rnn import pad_sequence
 
 from tokenizer import make_input
@@ -100,6 +100,39 @@ def new_collate_fn(batch):
     # video_mask = torch.arange(len(batch)*WIDTH).reshape((len(batch), WIDTH))
     return spec_batch_tensor, rgb_batch_tensor, label_batch_tensor
 
+
+def load_data(data_path, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1]):
+    # This is a convenience funtion that returns dataset splits of train, val and test according to the fractions specified in the arguments
+    assert sum(train_val_test_split) == 1, "Train, val and test fractions should sum to 1!"  # Always a good idea to use static asserts when processing arguments that are passed in by a user!
+    nlines = None
+    se = None
+    dataset = EmoDataset(data_path, nlines=nlines, sole_emotion=se)
+    
+    # This code generates the actual number of items that goes into each split using the user-supplied fractions
+    tr_va_te = []
+    for frac in train_val_test_split:
+        actual_count = frac * len(dataset)
+        actual_count = round(actual_count)
+        tr_va_te.append(actual_count)
+    
+    # split dataset into train, val and test
+    train_split, val_split, test_split = random_split(dataset, tr_va_te)
+    
+    # Use Pytorch DataLoader to load each split into memory. It's important to pass in our custom collate function, so it knows how to interpret the 
+    # data and load it. num_workers tells the DataLoader how many CPU threads to use so that data can be loaded in parallel, which is faster
+    train_dl = DataLoader(train_split, 
+                          batch_size=batch_sz, 
+                          shuffle=True, 
+                          collate_fn=new_collate_fn)            
+    val_dl = DataLoader(val_split, 
+                        batch_size=batch_sz, 
+                        shuffle=True, 
+                        collate_fn=new_collate_fn)
+    test_dl = DataLoader(test_split,
+                         batch_size=batch_sz,
+                         shuffle=False,
+                         collate_fn=new_collate_fn)
+    return train_dl, val_dl, test_dl
 
 
 
