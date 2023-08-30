@@ -117,12 +117,12 @@ def load_pretrained(
 
 
 class PretrainedViT(nn.Module):
-    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name):
+    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class=True):
         super().__init__()
         print(f"Loading {model_name}...")
         t_start = time.time()
         cfg = _cfg(pretrained_checkpoint_path)
-        self.model = VisionTransformer(in_chans=channels)
+        self.model = VisionTransformer(in_chans=channels, no_embed_class=no_class)
         load_pretrained(self.model, pretrained_cfg=cfg)
         delta_t = time.time() - t_start
         print(f"Loaded successfully in {delta_t:.1f}s")
@@ -141,24 +141,25 @@ class PretrainedViT(nn.Module):
 
 class ViTMBT(nn.Module):
     def __init__(self, embed_dim, num_bottle_token=4, bottle_layer=24
-                , project_type='conv2d', num_head=4, drop=.1, num_layers=30, num_class=8):
+                , project_type='conv2d', num_head=4, drop=.1, num_layers=30, num_class=8, no_class=True):
         super().__init__()
         self.num_class = num_class
+        self.classification_threshold = 0.95
         self.num_modalities = 2
         self.num_layers = num_layers
         self.bottle_layer = bottle_layer
         self.num_bottle_token = num_bottle_token
         self.num_multimodal_layers = num_layers - bottle_layer
         # make vision transformer layers be accessible via subscript
-        self.unimodal_audio = PretrainedViT(PRETRAINED_CHKPT, 8, 3, "audio layers")
-        self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, 24, 3 * FRAMES, "video layers")
+        self.unimodal_audio = PretrainedViT(PRETRAINED_CHKPT, 8, 3, "audio layers", no_class=no_class)
+        self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, 24, 3 * FRAMES, "video layers",no_class=no_class)
         self.multimodal_audio = clones(Block(embed_dim, num_head), self.num_multimodal_layers)
         self.multimodal_video = clones(Block(embed_dim, num_head), self.num_multimodal_layers)
         self.bottleneck_token = nn.Parameter(torch.zeros(1, num_bottle_token, embed_dim))
         self.acls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.vcls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.head = nn.Linear(self.num_modalities * embed_dim, num_class) # there are 2 modalities, each with embed_dim features
-        self.softmax = nn.Softmax()
+        self.head = nn.Linear(self.num_modalities * embed_dim, self.num_class) # there are 2 modalities, each with embed_dim features
+        self.sigmoid = nn.Sigmoid()
 
 
     def forward(self, a, v):
@@ -166,11 +167,6 @@ class ViTMBT(nn.Module):
         a = self.unimodal_audio.model.embed_project(a)
         v = self.unimodal_video.model.embed_project(v)
 
-        acls_tokens = self.acls_token.expand(B, -1, -1)
-        a = torch.cat((acls_tokens, a), dim=1)
-        
-        vcls_tokens = self.vcls_token.expand(B, -1, -1)
-        v = torch.cat((vcls_tokens, v), dim=1)
 
         a = self.unimodal_audio.model.forward_features(a)
         v = self.unimodal_video.model.forward_features(v)
@@ -191,11 +187,10 @@ class ViTMBT(nn.Module):
 
 
         out = torch.cat((a[:, :1, :], v[:, :1, :]), dim=1) # concatenating the classification tokens
-        # out = v[:, :1, :]
         out = out.flatten(start_dim=1, end_dim=2)
         out = self.head(out)
         out = out.reshape(B, 1, self.num_class)
-        out = self.softmax(out)
+        out = self.sigmoid(out)
         return out, bottleneck_token
 
 def toy_test(model):
@@ -219,8 +214,7 @@ def train(net, trainldr, optimizer, loss_fn, cls_metrics):
     total_losses = AverageMeter()
     batch_sz = len(trainldr)
     net.train()
-    all_y = None
-    all_labels = None
+    cls_metrics.reset()
     for batch_idx, data in enumerate(tqdm(trainldr)):
         audio, video, labels = data
         audio = audio.to(DEVICE)
@@ -228,67 +222,37 @@ def train(net, trainldr, optimizer, loss_fn, cls_metrics):
         labels = labels.float()
         labels = labels.to(DEVICE)
         optimizer.zero_grad()
-        # y = net(feature_audio, feature_video)
         y, bot_token = net(audio, video)
         loss = loss_fn(y, labels)
+        y = (y > net.module.classification_threshold).float()
+        cls_metrics.update(y.squeeze(1), labels.squeeze(1))
         loss.backward()
         optimizer.step()
         total_losses.update(loss.data.item(), audio.size(0))
 
-        if all_y == None:
-            all_y = y.clone()
-            all_labels = labels.clone()
-        else:
-            all_y = torch.cat((all_y, y), 0)
-            all_labels = torch.cat((all_labels, labels), 0)
-
-    all_y = all_y.squeeze(1).cpu().detach().numpy()
-    all_labels = all_labels.squeeze(1).cpu().detach().numpy()
-    all_labels, all_y = transform(all_labels, all_y)
-    f1 = f1_score(all_labels, all_y, average='weighted')
-    r = recall_score(all_labels, all_y, average='weighted')
-    p = precision_score(all_labels, all_y, average='weighted')
-    acc = accuracy_score(all_labels, all_y)
-    return total_losses.avg(), f1, r, p, acc, bot_token
+    cls_metrics.avg()
+    return total_losses.avg(), cls_metrics
 
 def val(net, valldr, loss_fn, cls_metrics):
     total_losses = AverageMeter()
+    cls_metrics.reset()
     net.eval()
-    all_y = None
-    all_labels = None
     with torch.no_grad():
         for batch_idx, data in enumerate(tqdm(valldr)):
             audio, video, labels = data
-            audio = torch.rand_like(audio)
-            video = torch.rand_like(video)
             audio = audio.to(DEVICE)
             video = video.to(DEVICE)
             labels = labels.float()
             labels = labels.to(DEVICE)
 
-            # y = net(feature_audio, feature_video)
             y, bot_token = net(audio, video)
             loss = loss_fn(y, labels)
 
-            # cls_metrics.calc(y, labels)
-            # cls_metrics.update(y, labels)
+            y = (y > net.module.classification_threshold).float()
+            cls_metrics.update(y.squeeze(1), labels.squeeze(1))
             total_losses.update(loss.data.item(), audio.size(0))
-
-            if all_y == None:
-                all_y = y.clone()
-                all_labels = labels.clone()
-            else:
-                all_y = torch.cat((all_y, y), 0)
-                all_labels = torch.cat((all_labels, labels), 0)
-    # cls_metrics.avg()
-    all_y = all_y.squeeze(1).cpu().detach().numpy()
-    all_labels = all_labels.squeeze(1).cpu().detach().numpy()
-    all_labels, all_y = transform(all_labels, all_y)
-    f1 = f1_score(all_labels, all_y, average='weighted')
-    r = recall_score(all_labels, all_y, average='weighted')
-    p = precision_score(all_labels, all_y, average='weighted')
-    acc = accuracy_score(all_labels, all_y)
-    return total_losses.avg(), f1, r, p, acc, bot_token
+    cls_metrics.avg()
+    return total_losses.avg(), cls_metrics
 
             
 if __name__ == "__main__":
