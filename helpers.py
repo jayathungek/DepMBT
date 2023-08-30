@@ -242,23 +242,24 @@ class ClassifierMetrics(object):
     precision: float
     recall: float
     f1: float
-    count: int
+    acc: float
+    count: int # number of batches seen 
 
     def __init__(self, task, n_labels, device):
         self.task = task
         if self.task == "multiclass":
-            self.ap_metric = tmcls.MulticlassAveragePrecision(task=self.task, num_classes=n_labels, average=None, thresholds=None).to(device)
-            self.precision_metric = tmcls.MulticlassPrecision(task=self.task, num_classes=n_labels).to(device)
-            self.recall_metric = tmcls.MulticlassRecall(task=self.task, num_classes=n_labels).to(device)
-            self.f1_metric = tmcls.MulticlassF1Score(task=self.task, num_classes=n_labels).to(device)
-            self.acc_metric = tmcls.MulticlassAccuracy(task=self.task, num_classes=n_labels).to(device)
+            self.ap_metric = tmcls.MulticlassAveragePrecision(num_classes=n_labels, average=None, thresholds=None).to(device)
+            self.precision_metric = tmcls.MulticlassPrecision(num_classes=n_labels).to(device)
+            self.recall_metric = tmcls.MulticlassRecall(num_classes=n_labels).to(device)
+            self.f1_metric = tmcls.MulticlassF1Score(num_classes=n_labels).to(device)
+            self.acc_metric = tmcls.MulticlassAccuracy(num_classes=n_labels).to(device)
 
         elif self.task == "multilabel":
             self.ap_metric = tmcls.MultilabelAveragePrecision(num_labels=n_labels, average=None, thresholds=None).to(device)
             self.precision_metric = tmcls.MultilabelPrecision(num_labels=n_labels).to(device)
             self.recall_metric = tmcls.MultilabelRecall(num_labels=n_labels).to(device)
             self.f1_metric = tmcls.MultilabelF1Score(num_labels=n_labels).to(device)
-            self.acc_metric = tmcls.MultilabelAccuracy(task=self.task, num_labels=n_labels).to(device)
+            self.acc_metric = tmcls.MultilabelAccuracy(num_labels=n_labels).to(device)
         self.reset()
     
 
@@ -267,6 +268,7 @@ class ClassifierMetrics(object):
         self.precision = 0
         self.recall = 0
         self.f1 = 0
+        self.acc = 0
         self.count = 0
 
     def update(self, y_pred, y):
@@ -275,21 +277,15 @@ class ClassifierMetrics(object):
         self.precision += self.precision_metric(y_pred, y)
         self.recall += self.recall_metric(y_pred, y)
         self.f1 += self.f1_metric(y_pred, y)
-        self.count += y.size(0)
-
-    def calc(self, y_pred, y):
-        self.reset()
-        y = y.long()
-        self.ap = self.ap_metric(y_pred, y)
-        self.precision = self.precision_metric(y_pred, y)
-        self.recall = self.recall_metric(y_pred, y)
-        self.f1 = self.f1_metric(y_pred, y)
+        self.acc += self.acc_metric(y_pred, y)
+        self.count += 1 
 
     def avg(self):
         self.ap = self.ap / self.count
         self.precision = self.precision / self.count
         self.recall = self.recall / self.count
         self.f1 = self.f1 / self.count
+        self.acc = self.acc / self.count
         
 
 
