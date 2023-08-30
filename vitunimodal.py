@@ -148,6 +148,7 @@ class ViTMBT(nn.Module):
         self.bottle_layer = bottle_layer
         self.num_bottle_token = num_bottle_token
         self.num_multimodal_layers = num_layers - bottle_layer
+        self.mode = mode
         # make vision transformer layers be accessible via subscript
         if mode == 'audio':
             self.unimodal_stack = PretrainedViT(PRETRAINED_CHKPT, 8, 3, "audio layers")
@@ -157,13 +158,13 @@ class ViTMBT(nn.Module):
         self.multimodal_stack = clones(Block(embed_dim, num_head), self.num_multimodal_layers)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         # self.bottleneck_token = nn.Parameter(torch.zeros(1, num_bottle_token, embed_dim))
-        self.head = nn.Linear(self.num_modalities * embed_dim, num_class) # there are 2 modalities, each with embed_dim features
+        self.head = nn.Linear(self.num_modalities * embed_dim, 10) # there are 2 modalities, each with embed_dim features
         self.softmax = nn.Softmax()
 
 
     def forward(self, x):
         B = x.shape[0] # Batch size
-        a = self.unimodal_stack.model.embed_project(x)
+        x = self.unimodal_stack.model.embed_project(x)
 
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
@@ -172,13 +173,13 @@ class ViTMBT(nn.Module):
 
 
         for i in range(self.num_multimodal_layers):
-            x  = self.multimodal_audio[i](x)
+            x  = self.multimodal_stack[i](x)
 
         out = x[:, :1, :]
         out = out.flatten(start_dim=1, end_dim=2)
         out = self.head(out)
-        out = out.reshape(B, 1, self.num_class)
-        out = self.softmax(out)
+        out = out.reshape(B, self.num_class) # (B, 1, self.num_class)
+        # out = self.softmax(out)
         return out
 
 def toy_test(model):
@@ -200,21 +201,17 @@ def toy_test(model):
 
 def train(net, trainldr, optimizer, loss_fn, cls_metrics):
     total_losses = AverageMeter()
-    batch_sz = len(trainldr)
     net.train()
-    all_y = None
-    all_labels = None
+    cls_metrics.reset()
     for batch_idx, data in enumerate(tqdm(trainldr)):
         # audio, video, labels = data
         audio, labels = data
-        if net.mode == "audio":
+        if net.module.mode == "audio":
             x = audio
-        elif net.mode == "video":
+        elif net.module.mode == "video":
             x = video
         
-        # x = torch.rand_like(x)
         x = x.to(DEVICE)
-        labels = labels.float()
         labels = labels.to(DEVICE)
         optimizer.zero_grad()
         y = net(x)
@@ -222,27 +219,12 @@ def train(net, trainldr, optimizer, loss_fn, cls_metrics):
         cls_metrics.update(y, labels)
         loss.backward()
         optimizer.step()
-        if net.mode == "audio":
+        if net.module.mode == "audio":
             total_losses.update(loss.data.item(), audio.size(0))
-        elif net.mode == "video":
+        elif net.module.mode == "video":
             total_losses.update(loss.data.item(), video.size(0))
 
-
-        # if all_y == None:
-        #     all_y = y.clone()
-        #     all_labels = labels.clone()
-        # else:
-        #     all_y = torch.cat((all_y, y), 0)
-        #     all_labels = torch.cat((all_labels, labels), 0)
-
     cls_metrics.avg()
-    # all_y = all_y.squeeze(1).cpu().detach().numpy()
-    # all_labels = all_labels.squeeze(1).cpu().detach().numpy()
-    # all_labels, all_y = transform(all_labels, all_y)
-    # f1 = f1_score(all_labels, all_y, average='weighted')
-    # r = recall_score(all_labels, all_y, average='weighted')
-    # p = precision_score(all_labels, all_y, average='weighted')
-    # acc = accuracy_score(all_labels, all_y)
     return total_losses.avg(), cls_metrics
 
 def val(net, valldr, loss_fn, cls_metrics):
@@ -250,44 +232,29 @@ def val(net, valldr, loss_fn, cls_metrics):
     net.eval()
     all_y = None
     all_labels = None
+    cls_metrics.reset()
     with torch.no_grad():
         for batch_idx, data in enumerate(tqdm(valldr)):
             # audio, video, labels = data
             audio, labels = data
-            if net.mode == "audio":
+            if net.module.mode == "audio":
                 x = audio
-            elif net.mode == "video":
+            elif net.module.mode == "video":
                 x = video
             
-            # x = torch.rand_like(x)
             x = x.to(DEVICE)
-            labels = labels.float()
             labels = labels.to(DEVICE)
 
-            # y = net(feature_audio, feature_video)
             y = net(audio)
             loss = loss_fn(y, labels)
 
             cls_metrics.update(y, labels)
-            if net.mode == "audio":
+            if net.module.mode == "audio":
                 total_losses.update(loss.data.item(), audio.size(0))
-            elif net.mode == "video":
+            elif net.module.mode == "video":
                 total_losses.update(loss.data.item(), video.size(0))
 
-            # if all_y == None:
-            #     all_y = y.clone()
-            #     all_labels = labels.clone()
-            # else:
-            #     all_y = torch.cat((all_y, y), 0)
-            #     all_labels = torch.cat((all_labels, labels), 0)
     cls_metrics.avg()
-    # all_y = all_y.squeeze(1).cpu().detach().numpy()
-    # all_labels = all_labels.squeeze(1).cpu().detach().numpy()
-    # all_labels, all_y = transform(all_labels, all_y)
-    # f1 = f1_score(all_labels, all_y, average='weighted')
-    # r = recall_score(all_labels, all_y, average='weighted')
-    # p = precision_score(all_labels, all_y, average='weighted')
-    # acc = accuracy_score(all_labels, all_y)
     return total_losses.avg(), cls_metrics
 
             
