@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch.nn import BCELoss
 import torch.nn as nn
-
+from pprint import pformat
 
 from importlib import reload
 
@@ -53,27 +53,28 @@ val_cls = ClassifierMetrics(task='multilabel', n_labels=LABELS, device=DEVICE)
 # loss_func = nn.CrossEntropyLoss()
 
 best = {
-    "optim": {optimizer.__class__.__name__},
-    "optim_lr": {optimizer.defaults.get('lr')},
-    "optim_momentum": {optimizer.defaults.get('momentum')},
-    "optim_weight_decay": {optimizer.defaults.get('weight_decay')},
-    "loss": {loss_func.__class__.__name__},
-    "batch_sz": {BATCH_SZ},
-    "epochs": {EPOCHS},
-    "val_loss": None,
-    "val_f1": None,
-    "val_recall": None,
-    "val_precision": None,
-    "val_acc": None
+    "optim": optimizer.__class__.__name__,
+    "optim_lr": optimizer.defaults.get('lr'),
+    "optim_momentum": optimizer.defaults.get('momentum'),
+    "optim_weight_decay": optimizer.defaults.get('weight_decay'),
+    "loss": loss_func.__class__.__name__,
+    "batch_sz": BATCH_SZ,
+    "epochs": EPOCHS,
+    "val": {
+        "loss": None,
+        "f1": None,
+        "recall": None,
+        "precision": None,
+        "acc": None
+    },
+    "train": {
+        "loss": None,
+        "f1": None,
+        "recall": None,
+        "precision": None,
+        "acc": None
+    }
 }
-
-print(f"optim: {optimizer.__class__.__name__}")
-print(f"optim lr: {optimizer.defaults.get('lr')}")
-print(f"optim momentum: {optimizer.defaults.get('momentum')}")
-print(f"loss: {loss_func.__class__.__name__}")
-print(f"batch sz: {BATCH_SZ}")
-print(f"epochs: {EPOCHS}")
-
 
 for epoch in range(EPOCHS):
     train_loss, train_metrics = train(vmbt, train_dl, optimizer, loss_fn=loss_func, cls_metrics=train_cls)
@@ -99,13 +100,19 @@ for epoch in range(EPOCHS):
             )
         )
 
-    if best["val_f1"] is None or (best["val_f1"] is not None and val_f1_val > best["val_f1"]): 
-        best["val_loss"] = val_loss
-        best["val_f1"] = val_f1_val
-        best["val_recall"] = val_recall_val
-        best["val_precision"] = val_precision_val
-        best["val_acc"] = val_acc_val
+    if best["val"]["f1"] is None or (best["val"]["f1"] is not None and val_f1_val > best["val"]["f1"]): 
+        best["val"]["loss"] = val_loss
+        best["val"]["f1"] = val_f1_val
+        best["val"]["recall"] = val_recall_val
+        best["val"]["precision"] = val_precision_val
+        best["val"]["acc"] = val_acc_val
+        best["train"]["loss"] = train_loss
+        best["train"]["f1"] = train_f1_val
+        best["train"]["recall"] = train_recall_val
+        best["train"]["precision"] = train_precision_val
+        best["train"]["acc"] = train_acc_val
 
 with open(RESULTS, "a") as fh:
-    fh.write(str(best))
+    best_str = pformat(best)
+    fh.write(best_str)
     fh.write("\n")

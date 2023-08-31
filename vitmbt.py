@@ -140,8 +140,8 @@ class PretrainedViT(nn.Module):
 
 
 class ViTMBT(nn.Module):
-    def __init__(self, embed_dim, num_bottle_token=4, bottle_layer=24
-                , project_type='conv2d', num_head=4, drop=.1, num_layers=30, num_class=8, no_class=True):
+    def __init__(self, embed_dim, num_bottle_token=4, bottle_layer=20
+                , project_type='conv2d', num_head=4, drop=.1, num_layers=24, num_class=8, no_class=True, freeze_last=4):
         super().__init__()
         self.num_class = num_class
         self.classification_threshold = 0.95
@@ -151,8 +151,8 @@ class ViTMBT(nn.Module):
         self.num_bottle_token = num_bottle_token
         self.num_multimodal_layers = num_layers - bottle_layer
         # make vision transformer layers be accessible via subscript
-        self.unimodal_audio = PretrainedViT(PRETRAINED_CHKPT, 8, 3, "audio layers", no_class=no_class)
-        self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, 24, 3 * FRAMES, "video layers",no_class=no_class)
+        self.unimodal_audio = PretrainedViT(PRETRAINED_CHKPT, self.bottle_layer, 3, "audio layers", no_class=no_class)
+        self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, self.bottle_layer, 3 * FRAMES, "video layers",no_class=no_class)
         self.multimodal_audio = clones(Block(embed_dim, num_head), self.num_multimodal_layers)
         self.multimodal_video = clones(Block(embed_dim, num_head), self.num_multimodal_layers)
         self.bottleneck_token = nn.Parameter(torch.zeros(1, num_bottle_token, embed_dim))
@@ -160,6 +160,11 @@ class ViTMBT(nn.Module):
         self.vcls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.head = nn.Linear(self.num_modalities * embed_dim, self.num_class) # there are 2 modalities, each with embed_dim features
         self.sigmoid = nn.Sigmoid()
+
+        assert freeze_last < self.bottle_layer, f"freeze_last must be at least the number of layers until the bottleneck layer: {self.bottle_layer}"
+        for layer_num in range(self.bottle_layer - freeze_last, self.bottle_layer):
+            self.unimodal_audio.model.blocks[layer_num].requires_grad_(False)
+            self.unimodal_video.model.blocks[layer_num].requires_grad_(False)
 
 
     def forward(self, a, v):
