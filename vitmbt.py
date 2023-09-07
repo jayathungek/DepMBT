@@ -162,7 +162,7 @@ class ViTMBT(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
         assert freeze_last < self.bottle_layer, f"freeze_last must be at least the number of layers until the bottleneck layer: {self.bottle_layer}"
-        for layer_num in range(self.bottle_layer - freeze_last, self.bottle_layer):
+        for layer_num in range(self.bottle_layer - freeze_last):
             self.unimodal_audio.model.blocks[layer_num].requires_grad_(False)
             self.unimodal_video.model.blocks[layer_num].requires_grad_(False)
 
