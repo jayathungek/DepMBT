@@ -7,6 +7,9 @@ import numpy as np
 from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader, random_split
 from torch.nn.utils.rnn import pad_sequence
+import torch.nn as nn
+from torchvision import transforms
+import matplotlib.pyplot as plt
 
 from tokenizer import make_input
 from constants import *
@@ -179,7 +182,16 @@ if __name__=="__main__":
     # parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')
     # args = parser.parse_args()
     # gen_dataset(args.rate, args.keep)
-    ds = EmoDataset("/root/intelpa-1/datasets/EmoReact/EmoReact_V_1.0/Labels/train_labels_full.txt", nlines=None, sole_emotion=1)
-    dl = DataLoader(ds, collate_fn=new_collate_fn, shuffle=True, batch_size=2)
+    ds = EmoDataset("/root/intelpa-1/datasets/EmoReact/EmoReact_V_1.0/Labels/all_pruned.csv", nlines=None, sole_emotion=None)
+    dl = DataLoader(ds, collate_fn=new_collate_fn, shuffle=True, batch_size=1)
+
+    video_augmentations = nn.Sequential(
+        transforms.ColorJitter(),
+        transforms.GaussianBlur(),
+        transforms.RandomRotation(),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomInvert()
+    )
     for audio, visual, label in dl:
         print(audio.shape, visual.shape, label.shape)
+        plt.plot(visual)

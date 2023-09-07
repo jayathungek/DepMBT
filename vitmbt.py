@@ -11,7 +11,7 @@ import torch
 import torchvision.transforms as T
 import torch.nn as nn
 from torch.nn import BCELoss
-import torch.nn.functional as F
+from torchvision import transforms
 from torch.utils.data import DataLoader
 from timm.models._manipulate import adapt_input_conv
 from timm.models._helpers import load_state_dict
@@ -138,13 +138,30 @@ class PretrainedViT(nn.Module):
         return self.model.forward_features(x)
         
 
+def reset_weights(m: nn.Module, cutoff):
+    for name, module in m.named_modules():
+        if name:
+            try:
+                layer = int(name)
+            except ValueError:
+                layer = int(name.split('.')[0])
+
+            if layer >= cutoff:
+                if hasattr(module, 'reset_parameters'): 
+                    print(f'Reset trainable parameters of layer = {name}')
+                    module.reset_parameters()
+
+# try and implement DropDim regularisation (https://ieeexplore.ieee.org/document/9670702)
+class DropDim(nn.Module):
+    def __init__(self, drop_rate: float) -> None:
+        super().__init__()
 
 class ViTMBT(nn.Module):
-    def __init__(self, embed_dim, num_bottle_token=4, bottle_layer=20
-                , project_type='conv2d', num_head=4, drop=.1, num_layers=24, num_class=8, no_class=True, freeze_last=4):
+    def __init__(self, embed_dim, num_bottle_token=4, bottle_layer=12
+                , project_type='conv2d', num_head=4, drop=.1, num_layers=14, num_class=8, no_class=True, freeze_first=10, apply_augmentation=False):
         super().__init__()
         self.num_class = num_class
-        self.classification_threshold = 0.95
+        self.classification_threshold = 0.75
         self.num_modalities = 2
         self.num_layers = num_layers
         self.bottle_layer = bottle_layer
@@ -153,19 +170,32 @@ class ViTMBT(nn.Module):
         # make vision transformer layers be accessible via subscript
         self.unimodal_audio = PretrainedViT(PRETRAINED_CHKPT, self.bottle_layer, 3, "audio layers", no_class=no_class)
         self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, self.bottle_layer, 3 * FRAMES, "video layers",no_class=no_class)
-        self.multimodal_audio = clones(Block(embed_dim, num_head), self.num_multimodal_layers)
-        self.multimodal_video = clones(Block(embed_dim, num_head), self.num_multimodal_layers)
+        self.multimodal_audio = clones(Block(embed_dim, num_head, attn_drop=drop, qk_norm=True), self.num_multimodal_layers)
+        self.multimodal_video = clones(Block(embed_dim, num_head, attn_drop=drop, qk_norm=True), self.num_multimodal_layers)
         self.bottleneck_token = nn.Parameter(torch.zeros(1, num_bottle_token, embed_dim))
         self.acls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.vcls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.head = nn.Linear(self.num_modalities * embed_dim, self.num_class) # there are 2 modalities, each with embed_dim features
+        self.hidden_sz = 512
+        self.head = nn.Sequential(
+            nn.Linear(self.num_modalities * embed_dim, self.hidden_sz), # there are 2 modalities, each with embed_dim features
+            nn.Dropout(drop),
+            nn.Linear(self.hidden_sz, self.num_class)
+        ) 
         self.sigmoid = nn.Sigmoid()
+        self.video_augmentations = nn.Sequential(
+            transforms.RandomRotation(degrees=15),
+            transforms.RandomHorizontalFlip(p=0.2),
+            transforms.RandomInvert(p=0.2)
+        ) if apply_augmentation else nn.Identity()
 
-        assert freeze_last < self.bottle_layer, f"freeze_last must be at least the number of layers until the bottleneck layer: {self.bottle_layer}"
-        for layer_num in range(self.bottle_layer - freeze_last, self.bottle_layer):
+        assert freeze_first < self.bottle_layer, f"freeze_first must be at most the number of layers until the bottleneck layer: {self.bottle_layer}"
+        for layer_num in range(freeze_first):
             self.unimodal_audio.model.blocks[layer_num].requires_grad_(False)
             self.unimodal_video.model.blocks[layer_num].requires_grad_(False)
 
+
+        reset_weights(self.unimodal_audio.model.blocks, freeze_first)
+        reset_weights(self.unimodal_video.model.blocks, freeze_first)
 
     def forward(self, a, v):
         B = a.shape[0] # Batch size
@@ -217,11 +247,14 @@ def toy_test(model):
 
 def train(net, trainldr, optimizer, loss_fn, cls_metrics):
     total_losses = AverageMeter()
-    batch_sz = len(trainldr)
     net.train()
     cls_metrics.reset()
-    for batch_idx, data in enumerate(tqdm(trainldr)):
+    for data in tqdm(trainldr):
         audio, video, labels = data
+        batch_sz = video.shape[0]
+        video = video.reshape(batch_sz * 10, 3, 224, 224)
+        video = net.module.video_augmentations(video)
+        video = video.reshape(batch_sz, 30, 224, 224)
         audio = audio.to(DEVICE)
         video = video.to(DEVICE)
         labels = labels.float()
@@ -243,8 +276,9 @@ def val(net, valldr, loss_fn, cls_metrics):
     cls_metrics.reset()
     net.eval()
     with torch.no_grad():
-        for batch_idx, data in enumerate(tqdm(valldr)):
+        for data in tqdm(valldr):
             audio, video, labels = data
+            batch_sz = video.shape[0]
             audio = audio.to(DEVICE)
             video = video.to(DEVICE)
             labels = labels.float()

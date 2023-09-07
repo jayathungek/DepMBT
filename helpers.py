@@ -3,8 +3,6 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch 
-import torch.nn as nn
-import torch.nn.functional as F
 from math import cos, pi
 from sklearn.metrics import f1_score
 import torchmetrics.classification as tmcls 
