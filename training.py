@@ -1,3 +1,4 @@
+from functools import partial
 import torch
 from torch.utils.data import DataLoader
 from torch.nn import BCELoss
@@ -15,7 +16,7 @@ reload(ablation)
 reload(helpers)
 reload(vitmbt)
 from helpers import ClassifierMetrics, display_tensor_as_rgb
-from vitmbt import ViTMBT, train, val
+from vitmbt import ViTMBT, train, val, reset_weights
 # from vitunimodal import ViTMBT, train, val
 from data import EmoDataset, new_collate_fn, load_data
 import warnings
@@ -34,7 +35,7 @@ betas = (0.9, 0.999)
 momentum = 0.9
 BATCH_SZ = 16
 LABELS = 8
-SPLIT = [0.8, 0.1, 0.1]
+SPLIT = [0.9, 0.05, 0.05]
 
 vmbt = ViTMBT(1024, num_class=LABELS, no_class=False)
 vmbt = nn.DataParallel(vmbt).cuda()
@@ -96,7 +97,8 @@ for epoch in range(EPOCHS):
         (f"Epoch {epoch + 1}: train_loss {train_loss_val:.5f}, val_loss {val_loss_val:.5f}\n"
             f"                   train_precision {train_precision_val}, val_precision {val_precision_val}\n"
             f"                   train_recall {train_recall_val}, val_recall {val_recall_val}\n"
-            f"                   train_f1 {train_f1_val}, val_f1 {val_f1_val}"
+            f"                   train_f1 {train_f1_val}, val_f1 {val_f1_val}\n"
+            f"                   train_acc {train_acc_val}, val_acc {val_acc_val}"
             )
         )
 
@@ -112,6 +114,7 @@ for epoch in range(EPOCHS):
         best["train"]["precision"] = train_precision_val
         best["train"]["acc"] = train_acc_val
 
+print(pformat(best))
 with open(RESULTS, "a") as fh:
     best_str = pformat(best)
     fh.write(best_str)
