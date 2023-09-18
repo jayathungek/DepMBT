@@ -33,11 +33,11 @@ EPOCHS = 15
 lr = 0.00001
 betas = (0.9, 0.999)
 momentum = 0.9
-BATCH_SZ = 16
+BATCH_SZ = 32
 LABELS = 8
 SPLIT = [0.9, 0.05, 0.05]
 
-vmbt = ViTMBT(1024, num_class=LABELS, no_class=False)
+vmbt = ViTMBT(1024, num_class=LABELS, no_class=False, bottle_layer=20, freeze_first=18, num_layers=24)
 vmbt = nn.DataParallel(vmbt).cuda()
 
 
