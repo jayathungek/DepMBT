@@ -117,7 +117,7 @@ def load_pretrained(
 
 
 class PretrainedViT(nn.Module):
-    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class=True):
+    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class):
         super().__init__()
         print(f"Loading {model_name}...")
         t_start = time.time()
@@ -228,23 +228,6 @@ class ViTMBT(nn.Module):
         out = self.sigmoid(out)
         return out, bottleneck_token
 
-def toy_test(model):
-    config = {
-        'input_size': (3, 224, 224), 
-        'interpolation': 'bicubic',
-        'mean': (0.5, 0.5, 0.5), 
-        'std': (0.5, 0.5, 0.5),
-        'crop_pct': 0.9, 'crop_mode': 'center'
-    }
-    transform = create_transform(**config)
-    img = Image.open("dog.jpg").convert('RGB')
-    audio_batch = transform(img).unsqueeze(0)  
-    video_batch = transform(img).unsqueeze(0)  
-    output = model(audio_batch, video_batch)
-
-
-
-
 def train(net, trainldr, optimizer, loss_fn, cls_metrics):
     total_losses = AverageMeter()
     net.train()
@@ -294,6 +277,202 @@ def val(net, valldr, loss_fn, cls_metrics):
     return total_losses.avg(), cls_metrics
 
             
+
+
+def toy_test(model):
+    config = {
+        'input_size': (3, 224, 224), 
+        'interpolation': 'bicubic',
+        'mean': (0.5, 0.5, 0.5), 
+        'std': (0.5, 0.5, 0.5),
+        'crop_pct': 0.9, 'crop_mode': 'center'
+    }
+    transform = create_transform(**config)
+    img = Image.open("dog.jpg").convert('RGB')
+    audio_batch = transform(img).unsqueeze(0)  
+    video_batch = transform(img).unsqueeze(0)  
+    output = model(audio_batch, video_batch)
+
+class ViTAudio(nn.Module):
+    def __init__(self, embed_dim, bottle_layer=12, num_head=4, drop=.1, num_layers=14, num_class=8, no_class=False, freeze_first=10):
+        super().__init__()
+        self.num_class = num_class
+        self.cutoff_layer = bottle_layer
+        self.classification_threshold = 0.75
+        self.num_modalities = 1
+        self.num_multimodal_layers = num_layers - self.cutoff_layer
+        self.unimodal_audio = PretrainedViT(PRETRAINED_CHKPT, self.cutoff_layer, 3, "audio layers", no_class=no_class)
+        self.multimodal_audio = clones(Block(embed_dim, num_head, attn_drop=drop, qk_norm=True), self.num_multimodal_layers)
+        self.acls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.hidden_sz = 512
+        self.head = nn.Sequential(
+            nn.Linear(self.num_modalities * embed_dim, self.hidden_sz), # there are 2 modalities, each with embed_dim features
+            nn.Dropout(0.3),
+            nn.Linear(self.hidden_sz, self.num_class)
+        ) 
+        self.sigmoid = nn.Sigmoid()
+
+        assert freeze_first <= self.cutoff_layer, f"freeze_first must be at most the number of layers until the cutoff layer: {self.cutoff_layer}"
+        for layer_num in range(freeze_first):
+            self.unimodal_audio.model.blocks[layer_num].requires_grad_(False)
+
+
+        reset_weights(self.unimodal_audio.model.blocks, freeze_first)
+
+    def forward(self, a):
+        B = a.shape[0] # Batch size
+        a = self.unimodal_audio.model.embed_project(a)
+        a = self.unimodal_audio.model.forward_features(a)
+
+        for i in range(self.num_multimodal_layers):
+            a  = self.multimodal_audio[i](a)
+
+        out = a[:, :1, :] 
+        out = out.flatten(start_dim=1, end_dim=2)
+        out = self.head(out)
+        out = out.reshape(B, 1, self.num_class)
+        out = self.sigmoid(out)
+        return out
+
+def train_audio(net, trainldr, optimizer, loss_fn, cls_metrics):
+    total_losses = AverageMeter()
+    net.train()
+    cls_metrics.reset()
+    for data in tqdm(trainldr):
+        audio, _, labels = data
+        audio = audio.to(DEVICE)
+        labels = labels.float()
+        labels = labels.to(DEVICE)
+        optimizer.zero_grad()
+        y = net(audio)
+        loss = loss_fn(y, labels)
+        y = (y > net.module.classification_threshold).float()
+        cls_metrics.update(y.squeeze(1), labels.squeeze(1))
+        loss.backward()
+        optimizer.step()
+        total_losses.update(loss.data.item(), audio.size(0))
+
+    cls_metrics.avg()
+    return total_losses.avg(), cls_metrics
+
+def val_audio(net, valldr, loss_fn, cls_metrics):
+    total_losses = AverageMeter()
+    cls_metrics.reset()
+    net.eval()
+    with torch.no_grad():
+        for data in tqdm(valldr):
+            audio, _, labels = data
+            audio = audio.to(DEVICE)
+            labels = labels.float()
+            labels = labels.to(DEVICE)
+
+            y = net(audio)
+            loss = loss_fn(y, labels)
+
+            y = (y > net.module.classification_threshold).float()
+            cls_metrics.update(y.squeeze(1), labels.squeeze(1))
+            total_losses.update(loss.data.item(), audio.size(0))
+    cls_metrics.avg()
+    return total_losses.avg(), cls_metrics
+
+
+class ViTVideo(nn.Module):
+    def __init__(self, embed_dim, bottle_layer=12, num_head=4, drop=.1, num_layers=14, num_class=8, no_class=False, freeze_first=10, apply_augmentation=False):
+        super().__init__()
+        self.num_class = num_class
+        self.cutoff_layer = bottle_layer
+        self.classification_threshold = 0.75
+        self.num_modalities = 1
+        self.num_multimodal_layers = num_layers - self.cutoff_layer
+        self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, self.cutoff_layer, 3 * FRAMES, "video layers",no_class=no_class)
+        self.multimodal_video = clones(Block(embed_dim, num_head, attn_drop=drop, qk_norm=True), self.num_multimodal_layers)
+        self.vcls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.hidden_sz = 512
+        self.head = nn.Sequential(
+            nn.Linear(self.num_modalities * embed_dim, self.hidden_sz), # there are 2 modalities, each with embed_dim features
+            nn.Dropout(drop),
+            nn.Linear(self.hidden_sz, self.num_class)
+        ) 
+        self.sigmoid = nn.Sigmoid()
+        self.video_augmentations = nn.Sequential(
+            transforms.RandomRotation(degrees=15),
+            transforms.RandomHorizontalFlip(),
+            transforms.RandomInvert(),
+            transforms.ColorJitter(),
+            transforms.RandomCrop((224, 224)),
+            transforms.RandomAffine(degrees=10),
+            transforms.RandomAdjustSharpness(2)
+        ) if apply_augmentation else nn.Identity()
+
+        assert freeze_first <= self.cutoff_layer, f"freeze_first must be at most the number of layers until the cutoff layer: {self.cutoff_layer}"
+        for layer_num in range(freeze_first):
+            self.unimodal_video.model.blocks[layer_num].requires_grad_(False)
+
+
+        reset_weights(self.unimodal_video.model.blocks, freeze_first)
+
+    def forward(self, v):
+        B = v.shape[0] # Batch size
+        v = self.unimodal_video.model.embed_project(v)
+        v = self.unimodal_video.model.forward_features(v)
+
+        for i in range(self.num_multimodal_layers):
+            v = self.multimodal_video[i](v)
+
+        out = v[:, :1, :] 
+        out = out.flatten(start_dim=1, end_dim=2)
+        out = self.head(out)
+        out = out.reshape(B, 1, self.num_class)
+        out = self.sigmoid(out)
+        return out
+
+def train_video(net, trainldr, optimizer, loss_fn, cls_metrics):
+    total_losses = AverageMeter()
+    net.train()
+    cls_metrics.reset()
+    for data in tqdm(trainldr):
+        _, video, labels = data
+        batch_sz = video.shape[0]
+        video = video.reshape(batch_sz * 10, 3, 224, 224)
+        video = net.module.video_augmentations(video)
+        video = video.reshape(batch_sz, 30, 224, 224)
+        video = video.to(DEVICE)
+        labels = labels.float()
+        labels = labels.to(DEVICE)
+        optimizer.zero_grad()
+        y = net(video)
+        loss = loss_fn(y, labels)
+        y = (y > net.module.classification_threshold).float()
+        cls_metrics.update(y.squeeze(1), labels.squeeze(1))
+        loss.backward()
+        optimizer.step()
+        total_losses.update(loss.data.item(), labels.size(0))
+
+    cls_metrics.avg()
+    return total_losses.avg(), cls_metrics
+
+def val_video(net, valldr, loss_fn, cls_metrics):
+    total_losses = AverageMeter()
+    cls_metrics.reset()
+    net.eval()
+    with torch.no_grad():
+        for data in tqdm(valldr):
+            _, video, labels = data
+            video = video.to(DEVICE)
+            labels = labels.float()
+            labels = labels.to(DEVICE)
+
+            y = net(video)
+            loss = loss_fn(y, labels)
+
+            y = (y > net.module.classification_threshold).float()
+            cls_metrics.update(y.squeeze(1), labels.squeeze(1))
+            total_losses.update(loss.data.item(), labels.size(0))
+    cls_metrics.avg()
+    return total_losses.avg(), cls_metrics
+
+
+
 if __name__ == "__main__":
     EPOCHS = 200
     lr = 0.001

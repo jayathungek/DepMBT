@@ -15,9 +15,10 @@ reload(mbt)
 reload(ablation)
 reload(helpers)
 reload(vitmbt)
-from helpers import ClassifierMetrics, display_tensor_as_rgb
-from vitmbt import ViTMBT, train, val, reset_weights
-# from vitunimodal import ViTMBT, train, val
+from helpers import ClassifierMetrics
+# from vitmbt import ViTAudio, train_audio as train, val_audio as val
+from vitmbt import ViTVideo, train_video as train, val_video as val
+# from vitmbt import ViTMBT, train, val
 from data import EmoDataset, new_collate_fn, load_data
 import warnings
 warnings.filterwarnings('ignore')
@@ -37,7 +38,9 @@ BATCH_SZ = 32
 LABELS = 8
 SPLIT = [0.9, 0.05, 0.05]
 
-vmbt = ViTMBT(1024, num_class=LABELS, no_class=False, bottle_layer=20, freeze_first=18, num_layers=24)
+# vmbt = ViTMBT(1024, num_class=LABELS, no_class=False, bottle_layer=20, freeze_first=18, num_layers=24)
+vmbt = ViTVideo(1024, num_class=LABELS, bottle_layer=20, freeze_first=18, num_layers=24)
+# vmbt = ViTAudio(1024, num_class=LABELS, bottle_layer=20, freeze_first=18, num_layers=24)
 vmbt = nn.DataParallel(vmbt).cuda()
 
 
