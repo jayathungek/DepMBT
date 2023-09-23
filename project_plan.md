@@ -46,8 +46,26 @@ SPLIT = [0.9, 0.05, 0.05]
          'precision': 0.5690972208976746,
          'recall': 0.30669304728507996}}
 
+using new audio loading - padding instead of resizing
 (class_thresh: 0.75, hidden_layer=512, 0.5 linear dropout, 0.5 attn dropout, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True)
 split = [0.9, 0.05, 0.05]
+{'batch_sz': 32,
+ 'epochs': 25,
+ 'loss': 'BCELoss',
+ 'optim': 'AdamW',
+ 'optim_lr': 1e-05,
+ 'optim_momentum': None,
+ 'optim_weight_decay': 0.03125,
+ 'train': {'acc': 0.8744707107543945,
+           'f1': 0.5516762137413025,
+           'loss': 0.22906572486936433,
+           'precision': 0.7741323113441467,
+           'recall': 0.462685227394104},
+ 'val': {'acc': 0.798828125,
+         'f1': 0.3314495086669922,
+         'loss': 0.5450333544501552,
+         'precision': 0.4451252222061157,
+         'recall': 0.304807186126709}}
 
 ## Unimodal - audio
 (class_thresh: 0.75, hidden_layer=512, 0.1 linear dropout, 0.1 attn dropout, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=False)

@@ -22,10 +22,12 @@ from timm.data import IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
 from sklearn.metrics import recall_score, precision_score, accuracy_score, confusion_matrix
 
 from helpers import *
+from patch_embed import PatchEmbed
 from data import EmoDataset, new_collate_fn
 from constants import *
 from vision_transformer import VisionTransformer, Block
 from ablation import transform
+from patch_embed import PatchEmbed
 
 from helpers import is_jupyter
 if is_jupyter():
@@ -54,41 +56,6 @@ def _cfg(url='', **kwargs):
     }
 
 
-def resolve_pretrained_cfg(
-        variant: str,
-        pretrained_cfg=None,
-        pretrained_cfg_overlay=None,
-) -> PretrainedCfg:
-    model_with_tag = variant
-    pretrained_tag = None
-    if pretrained_cfg:
-        if isinstance(pretrained_cfg, dict):
-            # pretrained_cfg dict passed as arg, validate by converting to PretrainedCfg
-            pretrained_cfg = PretrainedCfg(**pretrained_cfg)
-        elif isinstance(pretrained_cfg, str):
-            pretrained_tag = pretrained_cfg
-            pretrained_cfg = None
-
-    # fallback to looking up pretrained cfg in model registry by variant identifier
-    if not pretrained_cfg:
-        if pretrained_tag:
-            model_with_tag = '.'.join([variant, pretrained_tag])
-        pretrained_cfg = get_pretrained_cfg(model_with_tag)
-
-    if not pretrained_cfg:
-        _logger.warning(
-            f"No pretrained configuration specified for {model_with_tag} model. Using a default."
-            f" Please add a config to the model pretrained_cfg registry or pass explicitly.")
-        pretrained_cfg = PretrainedCfg()  # instance with defaults
-
-    pretrained_cfg_overlay = pretrained_cfg_overlay or {}
-    if not pretrained_cfg.architecture:
-        pretrained_cfg_overlay.setdefault('architecture', variant)
-    pretrained_cfg = dataclasses.replace(pretrained_cfg, **pretrained_cfg_overlay)
-
-    return pretrained_cfg
-
-
 def load_pretrained(
         model: nn.Module,
         pretrained_cfg: Optional[Dict] = None,
@@ -115,14 +82,35 @@ def load_pretrained(
 
 
 
-
-class PretrainedViT(nn.Module):
+class PretrainedAST(nn.Module):
     def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class):
         super().__init__()
         print(f"Loading {model_name}...")
         t_start = time.time()
         cfg = _cfg(pretrained_checkpoint_path)
-        self.model = VisionTransformer(in_chans=channels, no_embed_class=no_class)
+
+        # EXPAND 1 CHANNEL SPECTROGRAM TO 3 CHANNELS WITH SAME CONTENT
+        self.model = VisionTransformer(in_chans=channels, no_embed_class=no_class, img_size=(NUM_MELS, MAX_SPEC_SEQ_LEN))
+        load_pretrained(self.model, pretrained_cfg=cfg)
+        delta_t = time.time() - t_start
+        print(f"Loaded successfully in {delta_t:.1f}s")
+
+        trimmed_layers = self.model.blocks[:cutoff_layer]
+        del self.model.norm
+        del self.model.fc_norm
+        del self.model.head
+        self.model.blocks = trimmed_layers
+
+    def forward(self, x):
+        return self.model.forward_features(x)
+
+class PretrainedViT(nn.Module):
+    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class, embed_layer=PatchEmbed, img_size=(224, 224)):
+        super().__init__()
+        print(f"Loading {model_name}...")
+        t_start = time.time()
+        cfg = _cfg(pretrained_checkpoint_path)
+        self.model = VisionTransformer(img_size=img_size, in_chans=channels, no_embed_class=no_class, embed_layer=embed_layer)
         load_pretrained(self.model, pretrained_cfg=cfg)
         delta_t = time.time() - t_start
         print(f"Loaded successfully in {delta_t:.1f}s")
@@ -152,9 +140,6 @@ def reset_weights(m: nn.Module, cutoff):
                     module.reset_parameters()
 
 # try and implement DropDim regularisation (https://ieeexplore.ieee.org/document/9670702)
-class DropDim(nn.Module):
-    def __init__(self, drop_rate: float) -> None:
-        super().__init__()
 
 class ViTMBT(nn.Module):
     def __init__(self, embed_dim, num_bottle_token=4, bottle_layer=12
@@ -168,7 +153,7 @@ class ViTMBT(nn.Module):
         self.num_bottle_token = num_bottle_token
         self.num_multimodal_layers = num_layers - bottle_layer
         # make vision transformer layers be accessible via subscript
-        self.unimodal_audio = PretrainedViT(PRETRAINED_CHKPT, self.bottle_layer, 3, "audio layers", no_class=no_class)
+        self.unimodal_audio = PretrainedAST(PRETRAINED_CHKPT, self.bottle_layer, 3, "audio layers", no_class=no_class)
         self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, self.bottle_layer, 3 * FRAMES, "video layers",no_class=no_class)
         self.multimodal_audio = clones(Block(embed_dim, num_head, attn_drop=drop, qk_norm=True), self.num_multimodal_layers)
         self.multimodal_video = clones(Block(embed_dim, num_head, attn_drop=drop, qk_norm=True), self.num_multimodal_layers)
@@ -201,7 +186,6 @@ class ViTMBT(nn.Module):
         B = a.shape[0] # Batch size
         a = self.unimodal_audio.model.embed_project(a)
         v = self.unimodal_video.model.embed_project(v)
-
 
         a = self.unimodal_audio.model.forward_features(a)
         v = self.unimodal_video.model.forward_features(v)
@@ -301,7 +285,8 @@ class ViTAudio(nn.Module):
         self.classification_threshold = 0.75
         self.num_modalities = 1
         self.num_multimodal_layers = num_layers - self.cutoff_layer
-        self.unimodal_audio = PretrainedViT(PRETRAINED_CHKPT, self.cutoff_layer, 3, "audio layers", no_class=no_class)
+        # self.unimodal_audio = PretrainedViT(PRETRAINED_CHKPT, self.cutoff_layer, 3, "audio layers", no_class=no_class)
+        self.unimodal_audio = PretrainedAST(PRETRAINED_CHKPT, self.cutoff_layer, 3, "audio layers", no_class=no_class)
         self.multimodal_audio = clones(Block(embed_dim, num_head, attn_drop=drop, qk_norm=True), self.num_multimodal_layers)
         self.acls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.hidden_sz = 512

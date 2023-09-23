@@ -37,10 +37,11 @@ from torch.jit import Final
 
 from timm.data import IMAGENET_DEFAULT_MEAN, IMAGENET_DEFAULT_STD, IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD, \
     OPENAI_CLIP_MEAN, OPENAI_CLIP_STD
-from timm.layers import PatchEmbed, Mlp, DropPath, trunc_normal_, lecun_normal_, resample_patch_embed, \
-    resample_abs_pos_embed, RmsNorm
+from timm.layers import Mlp, DropPath, trunc_normal_, lecun_normal_, resample_patch_embed, \
+    resample_abs_pos_embed, RmsNorm, PatchEmbed
 from _builder import build_model_with_cfg
 from _manipulate import named_apply, checkpoint_seq, adapt_input_conv
+from helpers import to_2tuple
 
 __all__ = ['VisionTransformer']  # model_registry will add each entrypoint fn to this
 
@@ -217,7 +218,7 @@ class VisionTransformer(nn.Module):
 
     def __init__(
             self,
-            img_size=224,
+            img_size=(224, 224),
             patch_size=16,
             in_chans=3,
             num_classes=1000,

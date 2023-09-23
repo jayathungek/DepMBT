@@ -17,8 +17,8 @@ reload(helpers)
 reload(vitmbt)
 from helpers import ClassifierMetrics
 # from vitmbt import ViTAudio, train_audio as train, val_audio as val
-from vitmbt import ViTVideo, train_video as train, val_video as val
-# from vitmbt import ViTMBT, train, val
+# from vitmbt import ViTVideo, train_video as train, val_video as val
+from vitmbt import ViTMBT, train, val
 from data import EmoDataset, new_collate_fn, load_data
 import warnings
 warnings.filterwarnings('ignore')
@@ -30,7 +30,7 @@ from constants import *
 DEVICE = "cuda"
 RESULTS = "results/best.txt"
 PRETRAINED_CHKPT = "./pretrained_models/L_16-i21k-300ep-lr_0.001-aug_medium1-wd_0.1-do_0.1-sd_0.1--imagenet2012-steps_20k-lr_0.01-res_224.npz"
-EPOCHS = 15
+EPOCHS = 25
 lr = 0.00001
 betas = (0.9, 0.999)
 momentum = 0.9
@@ -38,8 +38,8 @@ BATCH_SZ = 32
 LABELS = 8
 SPLIT = [0.9, 0.05, 0.05]
 
-# vmbt = ViTMBT(1024, num_class=LABELS, no_class=False, bottle_layer=20, freeze_first=18, num_layers=24)
-vmbt = ViTVideo(1024, num_class=LABELS, bottle_layer=20, freeze_first=18, num_layers=24)
+vmbt = ViTMBT(1024, num_class=LABELS, no_class=False, bottle_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True, drop=0.5)
+# vmbt = ViTVideo(1024, num_class=LABELS, bottle_layer=20, freeze_first=18, num_layers=24)
 # vmbt = ViTAudio(1024, num_class=LABELS, bottle_layer=20, freeze_first=18, num_layers=24)
 vmbt = nn.DataParallel(vmbt).cuda()
 

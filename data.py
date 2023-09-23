@@ -11,7 +11,7 @@ import torch.nn as nn
 from torchvision import transforms
 import matplotlib.pyplot as plt
 
-from tokenizer import make_input
+from tokenizer import make_input, make_input_test
 from constants import *
 
 
@@ -67,34 +67,29 @@ def collate_fn(data):
 
 def new_collate_fn(batch):
     rgb_batch_tensor = torch.FloatTensor(len(batch), FRAMES * CHANS, HEIGHT, WIDTH)
-    spec_batch_tensor = torch.FloatTensor(len(batch), CHANS, HEIGHT, WIDTH)
+    spec_batch_tensor = torch.FloatTensor(len(batch), CHANS, NUM_MELS, MAX_SPEC_SEQ_LEN)
     label_batch_tensor = torch.LongTensor(len(batch), NUM_LABELS)
     rgb_tensor_list = []
     spec_tensor_list = []
     labels_list = []
-    last_file, last_label =  None, None
     for filename, label in batch:
-        try:
-            rgb, spec = make_input(filename, SAMPLING_RATE)
-            rgb = rgb.reshape((CHANS * FRAMES, HEIGHT, WIDTH)).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
-            spec = spec.unsqueeze(0)                                         # c, h, w -> 1, c, h, w
-            label = torch.tensor([label], dtype=torch.long).unsqueeze(0)
-            rgb_tensor_list.append(rgb)
-            spec_tensor_list.append(spec)
-            labels_list.append(label)
-            last_file, last_label = filename, label
-        except Exception as e:
-            print(f"Error with {filename}: {e}")
-            print(f"Using last working file again: {filename}")
-            rgb, spec = make_input(last_file, SAMPLING_RATE)
-            rgb = rgb.reshape((CHANS * FRAMES, HEIGHT, WIDTH)).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
-            spec = spec.unsqueeze(0)                                         # c, h, w -> 1, c, h, w
-            rgb_tensor_list.append(rgb)
-            spec_tensor_list.append(spec)
-            labels_list.append(last_label)
+        rgb, spec = make_input_test(filename, SAMPLING_RATE)
+        rgb = rgb.reshape((CHANS * FRAMES, HEIGHT, WIDTH)).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
+        # spec = spec.unsqueeze(0)                                         # c, h, w -> 1, c, h, w
+        spec = spec.T
+        label = torch.tensor([label], dtype=torch.long).unsqueeze(0)
+        rgb_tensor_list.append(rgb)
+        spec_tensor_list.append(spec)
+        labels_list.append(label)
 
     torch.cat(rgb_tensor_list, out=rgb_batch_tensor)
-    torch.cat(spec_tensor_list, out=spec_batch_tensor)
+    # torch.cat(spec_tensor_list, out=spec_batch_tensor)
+    padding = (0, 0, 0, MAX_SPEC_SEQ_LEN - spec_tensor_list[0].shape[0])
+    spec_tensor_list[0] = nn.ConstantPad2d(padding, 0)(spec_tensor_list[0])
+    spec_batch_tensor = pad_sequence(spec_tensor_list, batch_first=True)
+    spec_batch_tensor = spec_batch_tensor.swapaxes(1, 2)
+    spec_batch_tensor = spec_batch_tensor.unsqueeze(1).repeat(1, 3, 1, 1)
+
     torch.cat(labels_list, out=label_batch_tensor)
     # label_batch_tensor = torch.vstack(labels_list)
     # label_batch_tensor = torch.LongTensor(labels_list).expand((len(batch), -1))
