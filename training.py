@@ -24,32 +24,56 @@ import warnings
 warnings.filterwarnings('ignore')
 
 from constants import *
+from bisect import bisect_right 
 
-
+import torch.optim.lr_scheduler as lrsch
 
 DEVICE = "cuda"
 RESULTS = "results/best.txt"
 PRETRAINED_CHKPT = "./pretrained_models/L_16-i21k-300ep-lr_0.001-aug_medium1-wd_0.1-do_0.1-sd_0.1--imagenet2012-steps_20k-lr_0.01-res_224.npz"
-EPOCHS = 25
-lr = 0.00001
+WARMUP_EPOCHS = 5
+EPOCHS = WARMUP_EPOCHS + 50
+lr = 0.00005
 betas = (0.9, 0.999)
 momentum = 0.9
 BATCH_SZ = 32
 LABELS = 8
 SPLIT = [0.9, 0.05, 0.05]
+MILESTONES = [WARMUP_EPOCHS]
+T_0 = 6
 
-vmbt = ViTMBT(1024, num_class=LABELS, no_class=False, bottle_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True, drop=0.5)
+
+vmbt = ViTMBT(1024, num_class=LABELS, no_class=False, bottle_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True, drop=0.4)
 # vmbt = ViTVideo(1024, num_class=LABELS, bottle_layer=20, freeze_first=18, num_layers=24)
 # vmbt = ViTAudio(1024, num_class=LABELS, bottle_layer=20, freeze_first=18, num_layers=24)
 vmbt = nn.DataParallel(vmbt).cuda()
+# vmbt = nn.ParameterList([nn.parameter.Parameter(torch.randn(1))])
+
 
 
 train_dl, val_dl, test_dl  = load_data(f"{DATA_DIR}/Labels/all_pruned.csv", 
                                        batch_sz=BATCH_SZ,
                                        train_val_test_split=SPLIT)
 
-optimizer = torch.optim.AdamW(vmbt.parameters(), betas=(0.9, 0.999), lr=lr, weight_decay=1.0 / BATCH_SZ)
-# optimizer = torch.optim.SGD(vmbt.parameters(), lr=lr, momentum=momentum, weight_decay=1/BATCH_SZ)
+optimizer = torch.optim.AdamW(vmbt.parameters(), betas=(0.9, 0.999), lr=lr, weight_decay=0.4)
+
+scheduler = lrsch.SequentialLR(
+    optimizer=optimizer,
+    schedulers=[
+    lrsch.ConstantLR(optimizer=optimizer, factor=1, total_iters=WARMUP_EPOCHS),
+    lrsch.CosineAnnealingWarmRestarts(optimizer=optimizer, T_0=T_0)
+], milestones=MILESTONES)
+
+# lst = []
+# for x in range(EPOCHS):
+#     scheduler.step()
+#     idx = bisect_right(MILESTONES, x)
+#     lst.append(scheduler._schedulers[idx].get_last_lr()[0])
+
+# for item in lst:
+#     print(item)
+
+# exit()
 
 loss_func = BCELoss()
 train_cls = ClassifierMetrics(task='multilabel', n_labels=LABELS, device=DEVICE)
@@ -64,6 +88,7 @@ best = {
     "loss": loss_func.__class__.__name__,
     "batch_sz": BATCH_SZ,
     "epochs": EPOCHS,
+    "best_epoch": 0,
     "val": {
         "loss": None,
         "f1": None,
@@ -83,6 +108,7 @@ best = {
 for epoch in range(EPOCHS):
     train_loss, train_metrics = train(vmbt, train_dl, optimizer, loss_fn=loss_func, cls_metrics=train_cls)
     val_loss, val_metrics = val(vmbt, val_dl, loss_fn=loss_func, cls_metrics=val_cls)
+    scheduler.step()
 
     val_loss_val = val_loss
     val_f1_val = val_metrics.f1.item()
@@ -106,6 +132,8 @@ for epoch in range(EPOCHS):
         )
 
     if best["val"]["f1"] is None or (best["val"]["f1"] is not None and val_f1_val > best["val"]["f1"]): 
+        best["best_epoch"] = epoch + 1
+        best["T_0"] = T_0
         best["val"]["loss"] = val_loss
         best["val"]["f1"] = val_f1_val
         best["val"]["recall"] = val_recall_val

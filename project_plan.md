@@ -67,6 +67,53 @@ split = [0.9, 0.05, 0.05]
          'precision': 0.4451252222061157,
          'recall': 0.304807186126709}}
 
+using new audio loading - padding instead of resizing, Cosine annealing LR
+(class_thresh: 0.75, hidden_layer=512, 0.5 linear dropout, 0.5 attn dropout, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True)
+split = [0.9, 0.05, 0.05]
+{'batch_sz': 32,
+ 'best_epoch': 17,
+ 'epochs': 30,
+ 'loss': 'BCELoss',
+ 'optim': 'AdamW',
+ 'optim_lr': 5e-05,
+ 'optim_momentum': None,
+ 'optim_weight_decay': 0.4,
+ 'T_0': 26,
+ 'train': {'acc': 0.9849545955657959,
+           'f1': 0.9109511375427246,
+           'loss': 0.03241169482623179,
+           'precision': 0.9384472370147705,
+           'recall': 0.8929294347763062},
+ 'val': {'acc': 0.7311789989471436,
+         'f1': 0.35093724727630615,
+         'loss': 1.1934142134807728,
+         'precision': 0.4828125238418579,
+         'recall': 0.29820191860198975}}
+
+
+using new audio loading - padding instead of resizing, Cosine annealing LR
+(class_thresh: 0.75, hidden_layer=512, 0.8 linear dropout, 0.8 attn dropout, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True)
+split = [0.9, 0.05, 0.05]
+{'batch_sz': 32,
+ 'best_epoch': 31,
+ 'epochs': 55,
+ 'loss': 'BCELoss',
+ 'optim': 'AdamW',
+ 'optim_lr': 5e-05,
+ 'optim_momentum': None,
+ 'optim_weight_decay': 0.4,
+ 'T_0': 6,
+ 'train': {'acc': 0.9967237710952759,
+           'f1': 0.9452287554740906,
+           'loss': 0.009313095987476792,
+           'precision': 0.9507728219032288,
+           'recall': 0.941108226776123},
+ 'val': {'acc': 0.7544388771057129,
+         'f1': 0.4274536967277527,
+         'loss': 1.6637600439566154,
+         'precision': 0.5294011831283569,
+         'recall': 0.4185143709182739}}
+
 ## Unimodal - audio
 (class_thresh: 0.75, hidden_layer=512, 0.1 linear dropout, 0.1 attn dropout, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=False)
 SPLIT = [0.9, 0.05, 0.05]
