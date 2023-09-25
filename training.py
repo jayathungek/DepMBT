@@ -132,8 +132,8 @@ for epoch in range(EPOCHS):
         )
 
     if best["val"]["f1"] is None or (best["val"]["f1"] is not None and val_f1_val > best["val"]["f1"]): 
-        best["best_epoch"] = epoch + 1
         best["T_0"] = T_0
+        best["best_epoch"] = epoch + 1
         best["val"]["loss"] = val_loss
         best["val"]["f1"] = val_f1_val
         best["val"]["recall"] = val_recall_val
