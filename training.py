@@ -17,8 +17,8 @@ reload(helpers)
 reload(vitmbt)
 from helpers import ClassifierMetrics
 # from vitmbt import ViTAudio, train_audio as train, val_audio as val
-# from vitmbt import ViTVideo, train_video as train, val_video as val
-from vitmbt import ViTMBT, train, val
+from vitmbt import ViTVideo, train_video as train, val_video as val
+# from vitmbt import ViTMBT, train, val
 from data import EmoDataset, new_collate_fn, load_data
 import warnings
 warnings.filterwarnings('ignore')
@@ -32,20 +32,23 @@ DEVICE = "cuda"
 RESULTS = "results/best.txt"
 PRETRAINED_CHKPT = "./pretrained_models/L_16-i21k-300ep-lr_0.001-aug_medium1-wd_0.1-do_0.1-sd_0.1--imagenet2012-steps_20k-lr_0.01-res_224.npz"
 WARMUP_EPOCHS = 5
-EPOCHS = WARMUP_EPOCHS + 50
+EPOCHS = WARMUP_EPOCHS + 30
 lr = 0.00005
 betas = (0.9, 0.999)
 momentum = 0.9
 BATCH_SZ = 32
 LABELS = 8
-SPLIT = [0.9, 0.05, 0.05]
+SPLIT = [0.95, 0.05, 0.0]
 MILESTONES = [WARMUP_EPOCHS]
 T_0 = 6
+PT_ATTN_DROPOUT = 0.15
+ATTN_DROPOUT = 0.4
+LINEAR_DROPOUT = 0.1
 
 
-vmbt = ViTMBT(1024, num_class=LABELS, no_class=False, bottle_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True, drop=0.4)
-# vmbt = ViTVideo(1024, num_class=LABELS, bottle_layer=20, freeze_first=18, num_layers=24)
-# vmbt = ViTAudio(1024, num_class=LABELS, bottle_layer=20, freeze_first=18, num_layers=24)
+# vmbt = ViTMBT(1024, num_class=LABELS, no_class=False, bottle_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT)
+vmbt = ViTVideo(1024, num_class=LABELS, bottle_layer=20, freeze_first=18, num_layers=24, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT, pt_attn_drop=PT_ATTN_DROPOUT, apply_augmentation=True)
+# vmbt = ViTAudio(1024, num_class=LABELS, bottle_layer=20, freeze_first=18, num_layers=24, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT, pt_attn_drop=PT_ATTN_DROPOUT)
 vmbt = nn.DataParallel(vmbt).cuda()
 # vmbt = nn.ParameterList([nn.parameter.Parameter(torch.randn(1))])
 
@@ -88,6 +91,9 @@ best = {
     "loss": loss_func.__class__.__name__,
     "batch_sz": BATCH_SZ,
     "epochs": EPOCHS,
+    "attn_dropout": ATTN_DROPOUT,
+    "pt_attn_dropout": PT_ATTN_DROPOUT,
+    "linear_dropout": LINEAR_DROPOUT,
     "best_epoch": 0,
     "val": {
         "loss": None,

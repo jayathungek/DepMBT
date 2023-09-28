@@ -91,8 +91,8 @@ split = [0.9, 0.05, 0.05]
          'recall': 0.29820191860198975}}
 
 
-using new audio loading - padding instead of resizing, Cosine annealing LR
-(class_thresh: 0.75, hidden_layer=512, 0.8 linear dropout, 0.8 attn dropout, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True)
+using new audio loading - padding instead of resizing, Cosine annealing LR, dropout only applied to fusion and linear layers  
+(class_thresh: 0.75, hidden_layer=512, 0.4 linear dropout, 0.4 attn dropout, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True)
 split = [0.9, 0.05, 0.05]
 {'batch_sz': 32,
  'best_epoch': 31,
@@ -113,6 +113,105 @@ split = [0.9, 0.05, 0.05]
          'loss': 1.6637600439566154,
          'precision': 0.5294011831283569,
          'recall': 0.4185143709182739}}
+
+using new audio loading - padding instead of resizing, Cosine annealing LR, dropout applied to pretrained, linear and fusion layers
+(class_thresh: 0.75, hidden_layer=512, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True)
+split = [0.95, 0.05, 0.0]
+{'T_0': 6,
+ 'batch_sz': 32,
+ 'best_epoch': 33,
+ 'dropout': 0.6,
+ 'epochs': 35,
+ 'loss': 'BCELoss',
+ 'optim': 'AdamW',
+ 'optim_lr': 5e-05,
+ 'optim_momentum': None,
+ 'optim_weight_decay': 0.4,
+ 'train': {'acc': 0.8260498046875,
+           'f1': 0.4346005618572235,
+           'loss': 0.3374116774648428,
+           'precision': 0.6985670924186707,
+           'recall': 0.3401227295398712},
+ 'val': {'acc': 0.7837358117103577,
+         'f1': 0.30548566579818726,
+         'loss': 0.5310498431876853,
+         'precision': 0.44162946939468384,
+         'recall': 0.24488280713558197}}
+
+using new audio loading - padding instead of resizing, Cosine annealing LR, dropout applied to pretrained, linear and fusion layers
+(class_thresh: 0.75, hidden_layer=512, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True)
+split = [0.95, 0.05, 0.0]
+{'T_0': 6,
+ 'batch_sz': 32,
+ 'best_epoch': 16,
+ 'dropout': 0.3,
+ 'epochs': 35,
+ 'loss': 'BCELoss',
+ 'optim': 'AdamW',
+ 'optim_lr': 5e-05,
+ 'optim_momentum': None,
+ 'optim_weight_decay': 0.4,
+ 'train': {'acc': 0.884521484375,
+           'f1': 0.6278195381164551,
+           'loss': 0.2129565179347992,
+           'precision': 0.8437825441360474,
+           'recall': 0.5259432196617126},
+ 'val': {'acc': 0.7606533765792847,
+         'f1': 0.3125903606414795,
+         'loss': 0.6558366660718564,
+         'precision': 0.41364261507987976,
+         'recall': 0.27420926094055176}}
+
+using new audio loading - padding instead of resizing, Cosine annealing LR, dropout applied to linear and fusion layers
+(class_thresh: 0.75, hidden_layer=512, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True)
+split = [0.95, 0.05, 0.0]
+{'T_0': 6,
+ 'attn_dropout': 0.8,
+ 'batch_sz': 32,
+ 'best_epoch': 23,
+ 'epochs': 35,
+ 'linear_dropout': 0.1,
+ 'loss': 'BCELoss',
+ 'optim': 'AdamW',
+ 'optim_lr': 5e-05,
+ 'optim_momentum': None,
+ 'optim_weight_decay': 0.4,
+ 'train': {'acc': 0.995361328125,
+           'f1': 0.959815263748169,
+           'loss': 0.01693048299057409,
+           'precision': 0.97265625,
+           'recall': 0.9507956504821777},
+ 'val': {'acc': 0.7633167505264282,
+         'f1': 0.4201613664627075,
+         'loss': 1.035628080368042,
+         'precision': 0.5329365134239197,
+         'recall': 0.36418652534484863}}
+
+using new audio loading - padding instead of resizing, Cosine annealing LR, dropout applied to linear and fusion layers
+0.01 dropout in pre-trained layers
+(class_thresh: 0.75, hidden_layer=512, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True)
+split = [0.95, 0.05, 0.0]
+{'T_0': 6,
+ 'attn_dropout': 0.4,
+ 'batch_sz': 32,
+ 'best_epoch': 27,
+ 'epochs': 35,
+ 'linear_dropout': 0.1,
+ 'loss': 'BCELoss',
+ 'optim': 'AdamW',
+ 'optim_lr': 5e-05,
+ 'optim_momentum': None,
+ 'optim_weight_decay': 0.4,
+ 'train': {'acc': 0.9942626953125,
+           'f1': 0.9629107713699341,
+           'loss': 0.01260563558753347,
+           'precision': 0.9709990620613098,
+           'recall': 0.9567868113517761},
+ 'val': {'acc': 0.7375710010528564,
+         'f1': 0.3817528784275055,
+         'loss': 1.3595906893412273,
+         'precision': 0.5141865015029907,
+         'recall': 0.3408358097076416}}
 
 ## Unimodal - audio
 (class_thresh: 0.75, hidden_layer=512, 0.1 linear dropout, 0.1 attn dropout, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=False)
@@ -157,6 +256,32 @@ SPLIT = [0.9, 0.05, 0.05]
          'recall': 0.2277800440788269}}
 
 
+using new audio loading - padding instead of resizing
+(class_thresh: 0.75, hidden_layer=512, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=False)
+SPLIT = [0.95, 0.05, 0.0]
+{'T_0': 6,
+ 'attn_dropout': 0.4,
+ 'batch_sz': 32,
+ 'best_epoch': 32,
+ 'epochs': 35,
+ 'linear_dropout': 0.1,
+ 'loss': 'BCELoss',
+ 'optim': 'AdamW',
+ 'optim_lr': 5e-05,
+ 'optim_momentum': None,
+ 'optim_weight_decay': 0.4,
+ 'pt_attn_dropout': 0.05,
+ 'train': {'acc': 0.989501953125,
+           'f1': 0.9517146944999695,
+           'loss': 0.02582615583378356,
+           'precision': 0.9654729962348938,
+           'recall': 0.9433674216270447},
+ 'val': {'acc': 0.7164417505264282,
+         'f1': 0.2929023206233978,
+         'loss': 1.683484156926473,
+         'precision': 0.3301091194152832,
+         'recall': 0.28019338846206665}}
+
 
 ## Unimodal - video
 (class_thresh: 0.75, hidden_layer=512, 0.1 linear dropout, 0.1 attn dropout, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=False)
@@ -179,6 +304,11 @@ SPLIT = [0.9, 0.05, 0.05]
          'precision': 0.6050595045089722,
          'recall': 0.27470237016677856}}
 
+(class_thresh: 0.75, hidden_layer=512, cutoff_layer=20, freeze_first=18, num_layers=24, apply_augmentation=True)
+SPLIT = [0.95, 0.05, 0.0]
+transforms.RandomRotation(degrees=15),
+transforms.RandomHorizontalFlip(),
+transforms.ColorJitter(),
 # Vision transformer is bad for video, need to change backbone
 this could be the main contribution of the work - vision transformer adapted for video, 
 specifically for emotion detection 

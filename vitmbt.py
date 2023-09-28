@@ -83,14 +83,13 @@ def load_pretrained(
 
 
 class PretrainedAST(nn.Module):
-    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class):
+    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class, drop):
         super().__init__()
         print(f"Loading {model_name}...")
         t_start = time.time()
         cfg = _cfg(pretrained_checkpoint_path)
 
-        # EXPAND 1 CHANNEL SPECTROGRAM TO 3 CHANNELS WITH SAME CONTENT
-        self.model = VisionTransformer(in_chans=channels, no_embed_class=no_class, img_size=(NUM_MELS, MAX_SPEC_SEQ_LEN))
+        self.model = VisionTransformer(in_chans=channels, no_embed_class=no_class, img_size=(NUM_MELS, MAX_SPEC_SEQ_LEN), attn_drop_rate=drop)
         load_pretrained(self.model, pretrained_cfg=cfg)
         delta_t = time.time() - t_start
         print(f"Loaded successfully in {delta_t:.1f}s")
@@ -105,12 +104,12 @@ class PretrainedAST(nn.Module):
         return self.model.forward_features(x)
 
 class PretrainedViT(nn.Module):
-    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class, embed_layer=PatchEmbed, img_size=(224, 224)):
+    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class, drop, embed_layer=PatchEmbed, img_size=(224, 224)):
         super().__init__()
         print(f"Loading {model_name}...")
         t_start = time.time()
         cfg = _cfg(pretrained_checkpoint_path)
-        self.model = VisionTransformer(img_size=img_size, in_chans=channels, no_embed_class=no_class, embed_layer=embed_layer)
+        self.model = VisionTransformer(img_size=img_size, in_chans=channels, no_embed_class=no_class, embed_layer=embed_layer, attn_drop_rate=drop)
         load_pretrained(self.model, pretrained_cfg=cfg)
         delta_t = time.time() - t_start
         print(f"Loaded successfully in {delta_t:.1f}s")
@@ -129,6 +128,7 @@ class PretrainedViT(nn.Module):
 def reset_weights(m: nn.Module, cutoff):
     for name, module in m.named_modules():
         if name:
+            
             try:
                 layer = int(name)
             except ValueError:
@@ -143,7 +143,7 @@ def reset_weights(m: nn.Module, cutoff):
 
 class ViTMBT(nn.Module):
     def __init__(self, embed_dim, num_bottle_token=4, bottle_layer=12
-                , project_type='conv2d', num_head=4, drop=.1, num_layers=14, num_class=8, no_class=True, freeze_first=10, apply_augmentation=False):
+                , project_type='conv2d', num_head=4, attn_drop=0.1, linear_drop=0.1, pt_attn_drop=0.1, num_layers=14, num_class=8, no_class=True, freeze_first=10, apply_augmentation=False):
         super().__init__()
         self.num_class = num_class
         self.classification_threshold = 0.75
@@ -153,17 +153,17 @@ class ViTMBT(nn.Module):
         self.num_bottle_token = num_bottle_token
         self.num_multimodal_layers = num_layers - bottle_layer
         # make vision transformer layers be accessible via subscript
-        self.unimodal_audio = PretrainedAST(PRETRAINED_CHKPT, self.bottle_layer, 3, "audio layers", no_class=no_class)
-        self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, self.bottle_layer, 3 * FRAMES, "video layers",no_class=no_class)
-        self.multimodal_audio = clones(Block(embed_dim, num_head, attn_drop=drop, qk_norm=True), self.num_multimodal_layers)
-        self.multimodal_video = clones(Block(embed_dim, num_head, attn_drop=drop, qk_norm=True), self.num_multimodal_layers)
+        self.unimodal_audio = PretrainedAST(PRETRAINED_CHKPT, self.bottle_layer, 3, "audio layers", drop=pt_attn_drop, no_class=no_class)
+        self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, self.bottle_layer, 3 * FRAMES, "video layers", drop=pt_attn_drop, no_class=no_class)
+        self.multimodal_audio = clones(Block(embed_dim, num_head, attn_drop=attn_drop, qk_norm=True), self.num_multimodal_layers)
+        self.multimodal_video = clones(Block(embed_dim, num_head, attn_drop=attn_drop, qk_norm=True), self.num_multimodal_layers)
         self.bottleneck_token = nn.Parameter(torch.zeros(1, num_bottle_token, embed_dim))
         self.acls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.vcls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.hidden_sz = 512
         self.head = nn.Sequential(
             nn.Linear(self.num_modalities * embed_dim, self.hidden_sz), # there are 2 modalities, each with embed_dim features
-            nn.Dropout(drop),
+            nn.Dropout(linear_drop),
             nn.Linear(self.hidden_sz, self.num_class)
         ) 
         self.sigmoid = nn.Sigmoid()
@@ -177,6 +177,7 @@ class ViTMBT(nn.Module):
         for layer_num in range(freeze_first):
             self.unimodal_audio.model.blocks[layer_num].requires_grad_(False)
             self.unimodal_video.model.blocks[layer_num].requires_grad_(False)
+
 
 
         reset_weights(self.unimodal_audio.model.blocks, freeze_first)
@@ -278,7 +279,7 @@ def toy_test(model):
     output = model(audio_batch, video_batch)
 
 class ViTAudio(nn.Module):
-    def __init__(self, embed_dim, bottle_layer=12, num_head=4, drop=.1, num_layers=14, num_class=8, no_class=False, freeze_first=10):
+    def __init__(self, embed_dim, bottle_layer=12, num_head=4, num_layers=14, num_class=8, no_class=False, freeze_first=10, attn_drop=0.1, linear_drop=0.1, pt_attn_drop=0.1):
         super().__init__()
         self.num_class = num_class
         self.cutoff_layer = bottle_layer
@@ -286,13 +287,13 @@ class ViTAudio(nn.Module):
         self.num_modalities = 1
         self.num_multimodal_layers = num_layers - self.cutoff_layer
         # self.unimodal_audio = PretrainedViT(PRETRAINED_CHKPT, self.cutoff_layer, 3, "audio layers", no_class=no_class)
-        self.unimodal_audio = PretrainedAST(PRETRAINED_CHKPT, self.cutoff_layer, 3, "audio layers", no_class=no_class)
-        self.multimodal_audio = clones(Block(embed_dim, num_head, attn_drop=drop, qk_norm=True), self.num_multimodal_layers)
+        self.unimodal_audio = PretrainedAST(PRETRAINED_CHKPT, self.cutoff_layer, 3, "audio layers", no_class=no_class, drop=pt_attn_drop)
+        self.multimodal_audio = clones(Block(embed_dim, num_head, attn_drop=attn_drop, qk_norm=True), self.num_multimodal_layers)
         self.acls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.hidden_sz = 512
         self.head = nn.Sequential(
             nn.Linear(self.num_modalities * embed_dim, self.hidden_sz), # there are 2 modalities, each with embed_dim features
-            nn.Dropout(0.3),
+            nn.Dropout(linear_drop),
             nn.Linear(self.hidden_sz, self.num_class)
         ) 
         self.sigmoid = nn.Sigmoid()
@@ -362,31 +363,27 @@ def val_audio(net, valldr, loss_fn, cls_metrics):
 
 
 class ViTVideo(nn.Module):
-    def __init__(self, embed_dim, bottle_layer=12, num_head=4, drop=.1, num_layers=14, num_class=8, no_class=False, freeze_first=10, apply_augmentation=False):
+    def __init__(self, embed_dim, bottle_layer=12, num_head=4, attn_drop=0.1, linear_drop=0.1, pt_attn_drop=0.1, num_layers=14, num_class=8, no_class=False, freeze_first=10, apply_augmentation=False):
         super().__init__()
         self.num_class = num_class
         self.cutoff_layer = bottle_layer
         self.classification_threshold = 0.75
         self.num_modalities = 1
         self.num_multimodal_layers = num_layers - self.cutoff_layer
-        self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, self.cutoff_layer, 3 * FRAMES, "video layers",no_class=no_class)
-        self.multimodal_video = clones(Block(embed_dim, num_head, attn_drop=drop, qk_norm=True), self.num_multimodal_layers)
+        self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, self.cutoff_layer, 3 * FRAMES, "video layers",no_class=no_class, drop=pt_attn_drop)
+        self.multimodal_video = clones(Block(embed_dim, num_head, attn_drop=attn_drop, qk_norm=True), self.num_multimodal_layers)
         self.vcls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
         self.hidden_sz = 512
         self.head = nn.Sequential(
             nn.Linear(self.num_modalities * embed_dim, self.hidden_sz), # there are 2 modalities, each with embed_dim features
-            nn.Dropout(drop),
+            nn.Dropout(linear_drop),
             nn.Linear(self.hidden_sz, self.num_class)
         ) 
         self.sigmoid = nn.Sigmoid()
         self.video_augmentations = nn.Sequential(
             transforms.RandomRotation(degrees=15),
             transforms.RandomHorizontalFlip(),
-            transforms.RandomInvert(),
             transforms.ColorJitter(),
-            transforms.RandomCrop((224, 224)),
-            transforms.RandomAffine(degrees=10),
-            transforms.RandomAdjustSharpness(2)
         ) if apply_augmentation else nn.Identity()
 
         assert freeze_first <= self.cutoff_layer, f"freeze_first must be at most the number of layers until the cutoff layer: {self.cutoff_layer}"

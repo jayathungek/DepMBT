@@ -99,11 +99,9 @@ def new_collate_fn(batch):
     return spec_batch_tensor, rgb_batch_tensor, label_batch_tensor
 
 
-def load_data(data_path, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1]):
+def load_data(data_path, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1], nlines=None, se=None):
     # This is a convenience funtion that returns dataset splits of train, val and test according to the fractions specified in the arguments
     assert sum(train_val_test_split) == 1, "Train, val and test fractions should sum to 1!"  # Always a good idea to use static asserts when processing arguments that are passed in by a user!
-    nlines = None
-    se = None
     dataset = EmoDataset(data_path, nlines=nlines, sole_emotion=se)
     
     # This code generates the actual number of items that goes into each split using the user-supplied fractions
@@ -118,18 +116,30 @@ def load_data(data_path, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1]):
     
     # Use Pytorch DataLoader to load each split into memory. It's important to pass in our custom collate function, so it knows how to interpret the 
     # data and load it. num_workers tells the DataLoader how many CPU threads to use so that data can be loaded in parallel, which is faster
-    train_dl = DataLoader(train_split, 
-                          batch_size=batch_sz, 
-                          shuffle=True, 
-                          collate_fn=new_collate_fn)            
-    val_dl = DataLoader(val_split, 
-                        batch_size=batch_sz, 
-                        shuffle=True, 
-                        collate_fn=new_collate_fn)
-    test_dl = DataLoader(test_split,
-                         batch_size=batch_sz,
-                         shuffle=False,
-                         collate_fn=new_collate_fn)
+    if len(train_split) > 0:
+        train_dl = DataLoader(train_split, 
+                            batch_size=batch_sz, 
+                            shuffle=True, 
+                            collate_fn=new_collate_fn)            
+    else:
+        train_dl = None
+
+    if len(val_split) > 0:
+        val_dl = DataLoader(val_split, 
+                            batch_size=batch_sz, 
+                            shuffle=True, 
+                            collate_fn=new_collate_fn)
+    else:
+        val_dl = None
+
+    if len(test_split) > 0:
+        test_dl = DataLoader(test_split,
+                            batch_size=batch_sz,
+                            shuffle=False,
+                            collate_fn=new_collate_fn)
+    else:
+        test_dl = None
+
     return train_dl, val_dl, test_dl
 
 
