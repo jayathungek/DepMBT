@@ -1,29 +1,21 @@
 import time
 import copy
 import logging
-import dataclasses
 
 from typing import Optional, Dict, Callable
 
 from PIL import Image
-import PIL.ImageOps
 import torch
 import torchvision.transforms as T
 import torch.nn as nn
-from torch.nn import BCELoss
 from torchvision import transforms
 from torch.utils.data import DataLoader
-from timm.models._manipulate import adapt_input_conv
-from timm.models._helpers import load_state_dict
 from timm.data.transforms_factory import create_transform
-from timm.models._pretrained import PretrainedCfg
-from timm.models._registry import get_pretrained_cfg
 from timm.data import IMAGENET_INCEPTION_MEAN, IMAGENET_INCEPTION_STD
-from sklearn.metrics import recall_score, precision_score, accuracy_score, confusion_matrix
 
 from helpers import *
 from patch_embed import PatchEmbed
-from data import EmoDataset, new_collate_fn
+from data import EmoDataset, Collate_fn
 from constants import *
 from vision_transformer import VisionTransformer, Block
 from ablation import transform
@@ -210,56 +202,88 @@ class ViTMBT(nn.Module):
         out = out.flatten(start_dim=1, end_dim=2)
         out = self.head(out)
         out = out.reshape(B, 1, self.num_class)
-        out = self.sigmoid(out)
-        return out, bottleneck_token
+        # move sigmoid operation into losses.py
+        # out = self.sigmoid(out)
+        return out
 
-def train(net, trainldr, optimizer, loss_fn, cls_metrics):
+def update_teacher_net_params(t, s):
+    for key in list(s.state_dict().keys()):
+        t.state_dict()[key] = NETWORK_MOMENTUM * t.state_dict()[key] + (1 - NETWORK_MOMENTUM)*s.state_dict()[key]
+    
+
+def train(teacher_net, student_net, trainldr, optimizer, centre, loss_fn):
     total_losses = AverageMeter()
-    net.train()
-    cls_metrics.reset()
+    teacher_net.train()
+    student_net.train()
     for data in tqdm(trainldr):
-        audio, video, labels = data
-        batch_sz = video.shape[0]
-        video = video.reshape(batch_sz * 10, 3, 224, 224)
-        video = net.module.video_augmentations(video)
-        video = video.reshape(batch_sz, 30, 224, 224)
-        audio = audio.to(DEVICE)
-        video = video.to(DEVICE)
-        labels = labels.float()
-        labels = labels.to(DEVICE)
+        teacher_rgb, student_rgb, teacher_spec, student_spec = data
+
+        # teacher outputs for each view
+        teacher_outputs = []
+        for video, audio in zip(teacher_rgb, teacher_spec):
+            batch_sz = video.shape[0]
+            video = video.reshape(batch_sz * 10, 3, 224, 224)
+            video = teacher_net.module.video_augmentations(video)
+            video = video.reshape(batch_sz, 30, 224, 224)
+            video = video.to(DEVICE)
+            audio = audio.to(DEVICE)
+            teacher_outputs.append(teacher_net(audio, video))
+
+        # student outputs for each view
+        student_outputs = []
+        for video, audio in zip(student_rgb, student_spec):
+            batch_sz = video.shape[0]
+            video = video.reshape(batch_sz * 10, 3, 224, 224)
+            video = teacher_net.module.video_augmentations(video)
+            video = video.reshape(batch_sz, 30, 224, 224)
+            video = video.to(DEVICE)
+            audio = audio.to(DEVICE)
+            student_outputs.append(student_net(audio, video))
+
         optimizer.zero_grad()
-        y, bot_token = net(audio, video)
-        loss = loss_fn(y, labels)
-        y = (y > net.module.classification_threshold).float()
-        cls_metrics.update(y.squeeze(1), labels.squeeze(1))
+        loss = loss_fn(teacher_outputs, student_outputs, centre)
         loss.backward()
         optimizer.step()
-        total_losses.update(loss.data.item(), audio.size(0))
+        update_teacher_net_params(teacher_net, student_net) 
+        centre = CENTRE_MOMENTUM * centre + (1 - CENTRE_MOMENTUM) * torch.cat(teacher_outputs).mean()
+        total_losses.update(loss.data.item(), batch_sz)
 
-    cls_metrics.avg()
-    return total_losses.avg(), cls_metrics
+    return total_losses.avg()
 
-def val(net, valldr, loss_fn, cls_metrics):
+def val(teacher_net, student_net, valldr, centre, loss_fn):
     total_losses = AverageMeter()
-    cls_metrics.reset()
-    net.eval()
+    student_net.eval()
+    teacher_net.eval()
     with torch.no_grad():
         for data in tqdm(valldr):
-            audio, video, labels = data
-            batch_sz = video.shape[0]
-            audio = audio.to(DEVICE)
-            video = video.to(DEVICE)
-            labels = labels.float()
-            labels = labels.to(DEVICE)
+            teacher_rgb, student_rgb, teacher_spec, student_spec = data
+            for video, audio in zip(student_rgb, student_spec):
+                # teacher outputs for each view
+                teacher_outputs = []
+                for video, audio in zip(teacher_rgb, teacher_spec):
+                    batch_sz = video.shape[0]
+                    video = video.reshape(batch_sz * 10, 3, 224, 224)
+                    video = teacher_net.module.video_augmentations(video)
+                    video = video.reshape(batch_sz, 30, 224, 224)
+                    video = video.to(DEVICE)
+                    audio = audio.to(DEVICE)
+                    teacher_outputs.append(teacher_net(audio, video))
 
-            y, bot_token = net(audio, video)
-            loss = loss_fn(y, labels)
+                # student outputs for each view
+                student_outputs = []
+                for video, audio in zip(student_rgb, student_spec):
+                    batch_sz = video.shape[0]
+                    video = video.reshape(batch_sz * 10, 3, 224, 224)
+                    video = teacher_net.module.video_augmentations(video)
+                    video = video.reshape(batch_sz, 30, 224, 224)
+                    video = video.to(DEVICE)
+                    audio = audio.to(DEVICE)
+                    student_outputs.append(student_net(audio, video))
 
-            y = (y > net.module.classification_threshold).float()
-            cls_metrics.update(y.squeeze(1), labels.squeeze(1))
-            total_losses.update(loss.data.item(), audio.size(0))
-    cls_metrics.avg()
-    return total_losses.avg(), cls_metrics
+                optimizer.zero_grad()
+                loss = loss_fn(teacher_outputs, student_outputs, centre)
+            total_losses.update(loss.data.item(), batch_sz)
+    return total_losses.avg()
 
             
 
@@ -469,6 +493,7 @@ if __name__ == "__main__":
     train_metrics = ClassifierMetrics(task='binary', n_labels=LABELS, device=DEVICE)
     val_metrics = ClassifierMetrics(task='binary', n_labels=LABELS, device=DEVICE)
 
+    new_collate_fn = Collate_fn()
     train_dl = DataLoader(train_ds, collate_fn=new_collate_fn, batch_size=BATCH_SZ, shuffle=True)
     val_dl = DataLoader(val_ds, collate_fn=new_collate_fn, batch_size=BATCH_SZ, shuffle=False)
     test_dl = DataLoader(test_ds, collate_fn=new_collate_fn, batch_size=BATCH_SZ, shuffle=False)

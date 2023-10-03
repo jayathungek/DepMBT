@@ -12,6 +12,7 @@ from torchvision import transforms
 import matplotlib.pyplot as plt
 
 from tokenizer import make_input, make_input_test
+from multicrop import MultiCrop
 from constants import *
 
 
@@ -51,52 +52,34 @@ class DVlog(Dataset):
     def __getitem__(self, idx):
         return self.dataset[idx][0], self.dataset[idx][1], self.dataset[idx][2], self.length[idx]
 
+class Collate_fn:
+    def __init__(self):
+        self.multicrop_rgb = MultiCrop(image_size=(HEIGHT, WIDTH), num_global_views=NUM_GLOBAL_VIEWS, num_local_views=NUM_LOCAL_VIEWS)
+        self.multicrop_spec = MultiCrop(image_size=(NUM_MELS, MAX_SPEC_SEQ_LEN), num_global_views=NUM_GLOBAL_VIEWS, num_local_views=NUM_LOCAL_VIEWS)
 
-def collate_fn(data):
-    audio, video, labels, lengths = zip(*data)
-    labels = torch.tensor(labels).long()
-    lengths = torch.tensor(lengths).long()
-    mask = torch.arange(max(lengths))[None, :] < lengths[:, None]
+    def __call__(self, batch):
+        rgb_batch_tensor = torch.FloatTensor(len(batch), FRAMES * CHANS, HEIGHT, WIDTH)
+        spec_batch_tensor = torch.FloatTensor(len(batch), CHANS, NUM_MELS, MAX_SPEC_SEQ_LEN)
+        rgb_tensor_list = []
+        spec_tensor_list = []
+        for filename, label in batch:
+            rgb, spec = make_input_test(filename, SAMPLING_RATE)
+            rgb = rgb.reshape((CHANS * FRAMES, HEIGHT, WIDTH)).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
+            spec = spec.T
+            rgb_tensor_list.append(rgb)
+            spec_tensor_list.append(spec)
 
-    feature_audio = [torch.tensor(a).long() for a in audio]
-    feature_video = [torch.tensor(v).long() for v in video]
-    feature_audio = pad_sequence(feature_audio, batch_first=True, padding_value=0)
-    feature_video = pad_sequence(feature_video, batch_first=True, padding_value=0)
-    return feature_audio.float(), feature_video.float(), mask.long(), labels
+        torch.cat(rgb_tensor_list, out=rgb_batch_tensor)
+        padding = (0, 0, 0, MAX_SPEC_SEQ_LEN - spec_tensor_list[0].shape[0])
+        spec_tensor_list[0] = nn.ConstantPad2d(padding, 0)(spec_tensor_list[0])
+        spec_batch_tensor = pad_sequence(spec_tensor_list, batch_first=True)
+        spec_batch_tensor = spec_batch_tensor.swapaxes(1, 2)
+        spec_batch_tensor = spec_batch_tensor.unsqueeze(1).repeat(1, 3, 1, 1)
+        rgb_teacher_views, rgb_student_views = self.multicrop_rgb(rgb_batch_tensor)
+        spec_teacher_views, spec_student_views = self.multicrop_spec(spec_batch_tensor)
 
-
-def new_collate_fn(batch):
-    rgb_batch_tensor = torch.FloatTensor(len(batch), FRAMES * CHANS, HEIGHT, WIDTH)
-    spec_batch_tensor = torch.FloatTensor(len(batch), CHANS, NUM_MELS, MAX_SPEC_SEQ_LEN)
-    label_batch_tensor = torch.LongTensor(len(batch), NUM_LABELS)
-    rgb_tensor_list = []
-    spec_tensor_list = []
-    labels_list = []
-    for filename, label in batch:
-        rgb, spec = make_input_test(filename, SAMPLING_RATE)
-        rgb = rgb.reshape((CHANS * FRAMES, HEIGHT, WIDTH)).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
-        # spec = spec.unsqueeze(0)                                         # c, h, w -> 1, c, h, w
-        spec = spec.T
-        label = torch.tensor([label], dtype=torch.long).unsqueeze(0)
-        rgb_tensor_list.append(rgb)
-        spec_tensor_list.append(spec)
-        labels_list.append(label)
-
-    torch.cat(rgb_tensor_list, out=rgb_batch_tensor)
-    # torch.cat(spec_tensor_list, out=spec_batch_tensor)
-    padding = (0, 0, 0, MAX_SPEC_SEQ_LEN - spec_tensor_list[0].shape[0])
-    spec_tensor_list[0] = nn.ConstantPad2d(padding, 0)(spec_tensor_list[0])
-    spec_batch_tensor = pad_sequence(spec_tensor_list, batch_first=True)
-    spec_batch_tensor = spec_batch_tensor.swapaxes(1, 2)
-    spec_batch_tensor = spec_batch_tensor.unsqueeze(1).repeat(1, 3, 1, 1)
-
-    torch.cat(labels_list, out=label_batch_tensor)
-    # label_batch_tensor = torch.vstack(labels_list)
-    # label_batch_tensor = torch.LongTensor(labels_list).expand((len(batch), -1))
-    # Don't need a mask as long as all items in the batch are guaranteed to be the same length in the time dim
-    # audio_mask = torch.arange(len(batch)*SPEC_WIDTH).reshape((len(batch), SPEC_WIDTH))
-    # video_mask = torch.arange(len(batch)*WIDTH).reshape((len(batch), WIDTH))
-    return spec_batch_tensor, rgb_batch_tensor, label_batch_tensor
+        return rgb_teacher_views, rgb_student_views, spec_teacher_views, spec_student_views
+        # return spec_batch_tensor, rgb_batch_tensor
 
 
 def load_data(data_path, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1], nlines=None, se=None):
@@ -116,6 +99,7 @@ def load_data(data_path, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1], nlin
     
     # Use Pytorch DataLoader to load each split into memory. It's important to pass in our custom collate function, so it knows how to interpret the 
     # data and load it. num_workers tells the DataLoader how many CPU threads to use so that data can be loaded in parallel, which is faster
+    new_collate_fn = Collate_fn()
     if len(train_split) > 0:
         train_dl = DataLoader(train_split, 
                             batch_size=batch_sz, 
