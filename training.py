@@ -26,7 +26,7 @@ EPOCHS = WARMUP_EPOCHS + 30
 lr = 0.00005
 betas = (0.9, 0.999)
 momentum = 0.9
-BATCH_SZ = 2
+BATCH_SZ = 8
 LABELS = 8
 SPLIT = [0.95, 0.05, 0.0]
 MILESTONES = [WARMUP_EPOCHS]
@@ -112,8 +112,8 @@ best = {
 }
 
 for epoch in range(EPOCHS):
-    train_loss = train(mbt_teacher, mbt_student, train_dl, optimizer, CENTRE_CONSTANT, loss_fn=multicrop_loss)
-    val_loss = val(mbt_teacher, mbt_student, val_dl, CENTRE_CONSTANT, loss_fn=multicrop_loss)
+    train_loss, updated_centre = train(mbt_teacher, mbt_student, train_dl, optimizer, CENTRE_CONSTANT, loss_fn=multicrop_loss)
+    val_loss = val(mbt_teacher, mbt_student, val_dl, updated_centre, loss_fn=multicrop_loss)
     scheduler.step()
 
     print(

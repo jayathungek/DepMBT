@@ -207,8 +207,12 @@ class ViTMBT(nn.Module):
         return out
 
 def update_teacher_net_params(t, s):
+    t_copy = t.state_dict().copy()
+    s_copy = s.state_dict().copy()
+
     for key in list(s.state_dict().keys()):
-        t.state_dict()[key] = NETWORK_MOMENTUM * t.state_dict()[key] + (1 - NETWORK_MOMENTUM)*s.state_dict()[key]
+        t_copy[key] = NETWORK_MOMENTUM * t_copy[key] + (1 - NETWORK_MOMENTUM)*s_copy[key]
+    return t_copy
     
 
 def train(teacher_net, student_net, trainldr, optimizer, centre, loss_fn):
@@ -244,11 +248,12 @@ def train(teacher_net, student_net, trainldr, optimizer, centre, loss_fn):
         loss = loss_fn(teacher_outputs, student_outputs, centre)
         loss.backward()
         optimizer.step()
-        update_teacher_net_params(teacher_net, student_net) 
-        centre = CENTRE_MOMENTUM * centre + (1 - CENTRE_MOMENTUM) * torch.cat(teacher_outputs).mean()
+        new_t_params = update_teacher_net_params(teacher_net, student_net) 
+        teacher_net.load_state_dict(new_t_params)
+        centre = CENTRE_MOMENTUM * centre + (1 - CENTRE_MOMENTUM) * torch.cat(teacher_outputs).detach().mean()
         total_losses.update(loss.data.item(), batch_sz)
 
-    return total_losses.avg()
+    return total_losses.avg(), centre
 
 def val(teacher_net, student_net, valldr, centre, loss_fn):
     total_losses = AverageMeter()

@@ -14,12 +14,15 @@ def cross_entropy_loss_with_centering(teacher_output, student_output, centre):
 
 
 def multicrop_loss(teacher_outputs: List[torch.tensor] , student_outputs: List[torch.tensor], centre: torch.tensor):
-    total = torch.scalar_tensor(0).to(DEVICE)
+    # return cross_entropy_loss_with_centering(teacher_outputs[0], teacher_outputs[1], 1)
+    losses = []
     for teacher_view in teacher_outputs:
         for student_view in student_outputs:
             if not torch.equal(teacher_view, student_view):
-                total += cross_entropy_loss_with_centering(teacher_view, student_view, centre)
-    return total
+                loss = cross_entropy_loss_with_centering(teacher_view, student_view, centre)
+                losses.append(loss.unsqueeze(0))
+    total_losses = torch.cat(losses)
+    return total_losses.mean()
 
 
 if __name__ == "__main__":
