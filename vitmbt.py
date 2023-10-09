@@ -214,11 +214,9 @@ def train(teacher_net, student_net, trainldr, optimizer, centre, loss_fn):
     teacher_net.train()
     student_net.train()
     for data in tqdm(trainldr):
-        teacher_rgb, student_rgb, teacher_spec, student_spec = data
-
         # teacher outputs for each view
         teacher_outputs = []
-        for video, audio in zip(teacher_rgb, teacher_spec):
+        for video, audio in zip(data["teacher_rgb"], data["teacher_spec"]):
             batch_sz = video.shape[0]
             video = video.reshape(batch_sz * 10, 3, 224, 224)
             video = teacher_net.module.video_augmentations(video)
@@ -230,7 +228,7 @@ def train(teacher_net, student_net, trainldr, optimizer, centre, loss_fn):
 
         # student outputs for each view
         student_outputs = []
-        for video, audio in zip(student_rgb, student_spec):
+        for video, audio in zip(data["student_rgb"], data["student_spec"]):
             batch_sz = video.shape[0]
             video = video.reshape(batch_sz * 10, 3, 224, 224)
             video = student_net.module.video_augmentations(video)
