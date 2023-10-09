@@ -24,3 +24,5 @@ dependencies:
       - matplotlib
       - ipywidgets
       - lightning_utilities
+      - plotly
+      - nbformat
