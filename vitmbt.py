@@ -285,7 +285,6 @@ def val(teacher_net, student_net, valldr, centre, loss_fn):
                     audio = audio.to(DEVICE)
                     student_outputs.append(student_net(audio, video))
 
-                optimizer.zero_grad()
                 loss = loss_fn(teacher_outputs, student_outputs, centre)
             total_losses.update(loss.data.item(), batch_sz)
     return total_losses.avg()
