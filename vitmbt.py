@@ -198,13 +198,7 @@ class ViTMBT(nn.Module):
             v = v[:, self.num_bottle_token:]
 
 
-        out = torch.cat((a[:, :1, :], v[:, :1, :]), dim=1) # concatenating the classification tokens
-        out = out.flatten(start_dim=1, end_dim=2)
-        out = self.head(out)
-        out = out.reshape(B, 1, self.num_class)
-        # move sigmoid operation into losses.py
-        # out = self.sigmoid(out)
-        return out
+        return bottleneck_token
 
 def update_teacher_net_params(t, s):
     t_copy = t.state_dict().copy()
@@ -231,18 +225,20 @@ def train(teacher_net, student_net, trainldr, optimizer, centre, loss_fn):
             video = video.reshape(batch_sz, 30, 224, 224)
             video = video.to(DEVICE)
             audio = audio.to(DEVICE)
-            teacher_outputs.append(teacher_net(audio, video))
+            teacher_embedding = teacher_net(audio, video)
+            teacher_outputs.append(teacher_embedding)
 
         # student outputs for each view
         student_outputs = []
         for video, audio in zip(student_rgb, student_spec):
             batch_sz = video.shape[0]
             video = video.reshape(batch_sz * 10, 3, 224, 224)
-            video = teacher_net.module.video_augmentations(video)
+            video = student_net.module.video_augmentations(video)
             video = video.reshape(batch_sz, 30, 224, 224)
             video = video.to(DEVICE)
             audio = audio.to(DEVICE)
-            student_outputs.append(student_net(audio, video))
+            student_embedding = student_net(audio, video)
+            student_outputs.append(student_embedding)
 
         optimizer.zero_grad()
         loss = loss_fn(teacher_outputs, student_outputs, centre)

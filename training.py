@@ -126,6 +126,7 @@ for epoch in range(EPOCHS):
         best["best_epoch"] = epoch + 1
         best["val"]["loss"] = val_loss
         best["train"]["loss"] = train_loss
+        torch.save(mbt_student.state_dict(), f"saved_models/mbt_student_val_loss_{val_loss:.5f}.pth")
 
 print(pformat(best))
 with open(RESULTS, "a") as fh:
