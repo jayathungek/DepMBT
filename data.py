@@ -182,7 +182,7 @@ if __name__=="__main__":
     # args = parser.parse_args()
     # gen_dataset(args.rate, args.keep)
     ds = EmoDataset("/root/intelpa-1/datasets/EmoReact/EmoReact_V_1.0/Labels/all_pruned.csv", nlines=None, sole_emotion=None)
-    dl = DataLoader(ds, collate_fn=new_collate_fn, shuffle=True, batch_size=1)
+    dl = DataLoader(ds, collate_fn=Collate_fn(), shuffle=True, batch_size=1)
 
     video_augmentations = nn.Sequential(
         transforms.ColorJitter(),
