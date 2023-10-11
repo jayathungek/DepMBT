@@ -255,31 +255,22 @@ def val(teacher_net, student_net, valldr, centre, loss_fn):
     teacher_net.eval()
     with torch.no_grad():
         for data in tqdm(valldr):
-            teacher_rgb, student_rgb, teacher_spec, student_spec = data
-            for video, audio in zip(student_rgb, student_spec):
-                # teacher outputs for each view
-                teacher_outputs = []
-                for video, audio in zip(teacher_rgb, teacher_spec):
-                    batch_sz = video.shape[0]
-                    video = video.reshape(batch_sz * 10, 3, 224, 224)
-                    video = teacher_net.module.video_augmentations(video)
-                    video = video.reshape(batch_sz, 30, 224, 224)
-                    video = video.to(DEVICE)
-                    audio = audio.to(DEVICE)
-                    teacher_outputs.append(teacher_net(audio, video))
+            # teacher outputs for each view
+            teacher_outputs = []
+            for video, audio in zip(data["teacher_rgb"], data["teacher_spec"]):
+                video = video.to(DEVICE)
+                audio = audio.to(DEVICE)
+                teacher_outputs.append(teacher_net(audio, video))
 
-                # student outputs for each view
-                student_outputs = []
-                for video, audio in zip(student_rgb, student_spec):
-                    batch_sz = video.shape[0]
-                    video = video.reshape(batch_sz * 10, 3, 224, 224)
-                    video = teacher_net.module.video_augmentations(video)
-                    video = video.reshape(batch_sz, 30, 224, 224)
-                    video = video.to(DEVICE)
-                    audio = audio.to(DEVICE)
-                    student_outputs.append(student_net(audio, video))
+            # student outputs for each view
+            student_outputs = []
+            for video, audio in zip(data["student_rgb"], data["student_spec"]):
+                batch_sz = video.shape[0]
+                video = video.to(DEVICE)
+                audio = audio.to(DEVICE)
+                student_outputs.append(student_net(audio, video))
 
-                loss = loss_fn(teacher_outputs, student_outputs, centre)
+            loss = loss_fn(teacher_outputs, student_outputs, centre)
             total_losses.update(loss.data.item(), batch_sz)
     return total_losses.avg()
 
