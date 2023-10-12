@@ -1,24 +1,40 @@
-import torch
-from torch.nn import BCELoss
-import torch.nn as nn
+import sys
 from pprint import pformat
+from pathlib import Path
+import warnings
+from argparse import ArgumentParser
+warnings.filterwarnings('ignore')
 
-from importlib import reload
+import torch
+import torch.nn as nn
+from torch.nn import BCELoss
+import torch.optim.lr_scheduler as lrsch
 
-from helpers import ClassifierMetrics
 # from vitmbt import ViTAudio, train_audio as train, val_audio as val
 # from vitmbt import ViTVideo, train_video as train, val_video as val
 from vitmbt import ViTMBT, train, val
 from data import load_data
-import warnings
-warnings.filterwarnings('ignore')
-
 from constants import *
+from helpers import ClassifierMetrics
 from loss import multicrop_loss
-from bisect import bisect_right 
 
-import torch.optim.lr_scheduler as lrsch
 
+def parse_args(args):
+    parser = ArgumentParser()
+    parser.add_argument("script")
+    parser.add_argument("-n", "--name")
+    parsed = parser.parse_args(args)
+    if parsed.name is None:
+        print("Need model name: -n OR --name")
+        exit(1)
+    return parsed
+
+
+parsed_args = parse_args(sys.argv)
+experiment_name = parsed_args.name
+save_path = Path(f"saved_models/{experiment_name}")
+save_path.mkdir(exist_ok=False)
+fpath_params = save_path / "hparams.txt"
 
 
 mbt_teacher = ViTMBT(1024, num_class=LABELS, no_class=False, bottle_layer=BOTTLE_LAYER, freeze_first=FREEZE_FIRST, num_layers=TOTAL_LAYERS, apply_augmentation=APPLY_AUG, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT)
@@ -55,6 +71,7 @@ best = {
     "loss": loss_func.__class__.__name__,
     "batch_sz": BATCH_SZ,
     "epochs": EPOCHS,
+    "T_0": T_0,
     "attn_dropout": ATTN_DROPOUT,
     "pt_attn_dropout": PT_ATTN_DROPOUT,
     "linear_dropout": LINEAR_DROPOUT,
@@ -76,6 +93,11 @@ best = {
     }
 }
 
+with fpath_params.open("w") as fh:
+    best_str = pformat(best)
+    fh.write(best_str)
+    fh.write("\n")
+
 for epoch in range(EPOCHS):
     train_loss, updated_centre = train(mbt_teacher, mbt_student, train_dl, optimizer, CENTRE_CONSTANT, loss_fn=multicrop_loss)
     val_loss = val(mbt_teacher, mbt_student, val_dl, updated_centre, loss_fn=multicrop_loss)
@@ -91,7 +113,10 @@ for epoch in range(EPOCHS):
         best["best_epoch"] = epoch + 1
         best["val"]["loss"] = val_loss
         best["train"]["loss"] = train_loss
-        torch.save(mbt_student.state_dict(), f"saved_models/mbt_student_val_loss_{val_loss:.5f}.pth")
+        fname = f"mbt_student_val_loss_{val_loss:.5f}"
+        fpath_chkpt = save_path / f"{fname}.pth"
+        torch.save(mbt_student.state_dict(), fpath_chkpt)
+
 
 print(pformat(best))
 with open(RESULTS, "a") as fh:
