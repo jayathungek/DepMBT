@@ -167,8 +167,4 @@ env_setup_done
 results/
 imagenet_classes.txt
 audioset_*.csv
-<<<<<<< HEAD
 saved_models
-=======
-saved_models
->>>>>>> unsupervised.multicrop-loss
