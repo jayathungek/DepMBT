@@ -60,16 +60,21 @@ class Collate_fn:
     def __call__(self, batch):
         rgb_batch_tensor = torch.FloatTensor(len(batch), FRAMES * CHANS, HEIGHT, WIDTH)
         spec_batch_tensor = torch.FloatTensor(len(batch), CHANS, NUM_MELS, MAX_SPEC_SEQ_LEN)
+        label_batch_tensor = torch.LongTensor(len(batch), NUM_LABELS)
         rgb_tensor_list = []
         spec_tensor_list = []
+        label_list = []
         for filename, label in batch:
             rgb, spec = make_input_test(filename, SAMPLING_RATE)
             rgb = rgb.reshape((CHANS * FRAMES, HEIGHT, WIDTH)).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
+            label = torch.tensor([label], dtype=torch.long).unsqueeze(0)
             spec = spec.T
             rgb_tensor_list.append(rgb)
             spec_tensor_list.append(spec)
+            label_list.append(label)
 
-        torch.cat(rgb_tensor_list, out=rgb_batch_tensor)
+
+        torch.cat(label_list, out=label_batch_tensor)
         padding = (0, 0, 0, MAX_SPEC_SEQ_LEN - spec_tensor_list[0].shape[0])
         spec_tensor_list[0] = nn.ConstantPad2d(padding, 0)(spec_tensor_list[0])
         spec_batch_tensor = pad_sequence(spec_tensor_list, batch_first=True)
@@ -78,8 +83,13 @@ class Collate_fn:
         rgb_teacher_views, rgb_student_views = self.multicrop_rgb(rgb_batch_tensor)
         spec_teacher_views, spec_student_views = self.multicrop_spec(spec_batch_tensor)
 
-        return rgb_teacher_views, rgb_student_views, spec_teacher_views, spec_student_views
-        # return spec_batch_tensor, rgb_batch_tensor
+        return {
+            "teacher_rgb": rgb_teacher_views,
+            "student_rgb": rgb_student_views,
+            "teacher_spec": spec_teacher_views,
+            "student_spec": spec_student_views,
+            "labels": label_batch_tensor
+        } 
 
 
 def load_data(data_path, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1], nlines=None, se=None):
@@ -172,7 +182,7 @@ if __name__=="__main__":
     # args = parser.parse_args()
     # gen_dataset(args.rate, args.keep)
     ds = EmoDataset("/root/intelpa-1/datasets/EmoReact/EmoReact_V_1.0/Labels/all_pruned.csv", nlines=None, sole_emotion=None)
-    dl = DataLoader(ds, collate_fn=new_collate_fn, shuffle=True, batch_size=1)
+    dl = DataLoader(ds, collate_fn=Collate_fn(), shuffle=True, batch_size=1)
 
     video_augmentations = nn.Sequential(
         transforms.ColorJitter(),

@@ -8,13 +8,12 @@ from constants import *
 
 def cross_entropy_loss_with_centering(teacher_output, student_output, centre):
     teacher_output = teacher_output.detach() # stop gradient
-    s = nn.Sigmoid()(student_output / TEMP_STUDENT)
-    t = nn.Sigmoid()((teacher_output - centre) / TEMP_TEACHER)
+    s = nn.Softmax()(student_output / TEMP_STUDENT)
+    t = nn.Softmax()((teacher_output - centre) / TEMP_TEACHER)
     return -(t * torch.log(s)).sum().mean()
 
 
 def multicrop_loss(teacher_outputs: List[torch.tensor] , student_outputs: List[torch.tensor], centre: torch.tensor):
-    # return cross_entropy_loss_with_centering(teacher_outputs[0], teacher_outputs[1], 1)
     losses = []
     for teacher_view in teacher_outputs:
         for student_view in student_outputs:

@@ -198,13 +198,7 @@ class ViTMBT(nn.Module):
             v = v[:, self.num_bottle_token:]
 
 
-        out = torch.cat((a[:, :1, :], v[:, :1, :]), dim=1) # concatenating the classification tokens
-        out = out.flatten(start_dim=1, end_dim=2)
-        out = self.head(out)
-        out = out.reshape(B, 1, self.num_class)
-        # move sigmoid operation into losses.py
-        # out = self.sigmoid(out)
-        return out
+        return bottleneck_token
 
 def update_teacher_net_params(t, s):
     t_copy = t.state_dict().copy()
@@ -220,29 +214,29 @@ def train(teacher_net, student_net, trainldr, optimizer, centre, loss_fn):
     teacher_net.train()
     student_net.train()
     for data in tqdm(trainldr):
-        teacher_rgb, student_rgb, teacher_spec, student_spec = data
-
         # teacher outputs for each view
         teacher_outputs = []
-        for video, audio in zip(teacher_rgb, teacher_spec):
+        for video, audio in zip(data["teacher_rgb"], data["teacher_spec"]):
             batch_sz = video.shape[0]
             video = video.reshape(batch_sz * 10, 3, 224, 224)
             video = teacher_net.module.video_augmentations(video)
             video = video.reshape(batch_sz, 30, 224, 224)
             video = video.to(DEVICE)
             audio = audio.to(DEVICE)
-            teacher_outputs.append(teacher_net(audio, video))
+            teacher_embedding = teacher_net(audio, video)
+            teacher_outputs.append(teacher_embedding)
 
         # student outputs for each view
         student_outputs = []
-        for video, audio in zip(student_rgb, student_spec):
+        for video, audio in zip(data["student_rgb"], data["student_spec"]):
             batch_sz = video.shape[0]
             video = video.reshape(batch_sz * 10, 3, 224, 224)
-            video = teacher_net.module.video_augmentations(video)
+            video = student_net.module.video_augmentations(video)
             video = video.reshape(batch_sz, 30, 224, 224)
             video = video.to(DEVICE)
             audio = audio.to(DEVICE)
-            student_outputs.append(student_net(audio, video))
+            student_embedding = student_net(audio, video)
+            student_outputs.append(student_embedding)
 
         optimizer.zero_grad()
         loss = loss_fn(teacher_outputs, student_outputs, centre)
@@ -261,31 +255,22 @@ def val(teacher_net, student_net, valldr, centre, loss_fn):
     teacher_net.eval()
     with torch.no_grad():
         for data in tqdm(valldr):
-            teacher_rgb, student_rgb, teacher_spec, student_spec = data
-            for video, audio in zip(student_rgb, student_spec):
-                # teacher outputs for each view
-                teacher_outputs = []
-                for video, audio in zip(teacher_rgb, teacher_spec):
-                    batch_sz = video.shape[0]
-                    video = video.reshape(batch_sz * 10, 3, 224, 224)
-                    video = teacher_net.module.video_augmentations(video)
-                    video = video.reshape(batch_sz, 30, 224, 224)
-                    video = video.to(DEVICE)
-                    audio = audio.to(DEVICE)
-                    teacher_outputs.append(teacher_net(audio, video))
+            # teacher outputs for each view
+            teacher_outputs = []
+            for video, audio in zip(data["teacher_rgb"], data["teacher_spec"]):
+                video = video.to(DEVICE)
+                audio = audio.to(DEVICE)
+                teacher_outputs.append(teacher_net(audio, video))
 
-                # student outputs for each view
-                student_outputs = []
-                for video, audio in zip(student_rgb, student_spec):
-                    batch_sz = video.shape[0]
-                    video = video.reshape(batch_sz * 10, 3, 224, 224)
-                    video = teacher_net.module.video_augmentations(video)
-                    video = video.reshape(batch_sz, 30, 224, 224)
-                    video = video.to(DEVICE)
-                    audio = audio.to(DEVICE)
-                    student_outputs.append(student_net(audio, video))
+            # student outputs for each view
+            student_outputs = []
+            for video, audio in zip(data["student_rgb"], data["student_spec"]):
+                batch_sz = video.shape[0]
+                video = video.to(DEVICE)
+                audio = audio.to(DEVICE)
+                student_outputs.append(student_net(audio, video))
 
-                loss = loss_fn(teacher_outputs, student_outputs, centre)
+            loss = loss_fn(teacher_outputs, student_outputs, centre)
             total_losses.update(loss.data.item(), batch_sz)
     return total_losses.avg()
 
