@@ -12,7 +12,7 @@ from data import load_data
 from vitmbt import ViTMBT
 from constants import *
 
-CHKPT_NAME = "mbt_student_val_loss_5720.63920"
+CHKPT_NAME = "mbt_student_val_loss_5697.87571"
 PKL_PATH = f"saved_models/{CHKPT_NAME}.pkl"
 
 def label_to_human_readable(label_tensor: torch.tensor) -> List[str]:
