@@ -12,7 +12,7 @@ from data import load_data
 from vitmbt import ViTMBT
 from constants import *
 
-CHKPT_NAME = "mbt_student_val_loss_5697.87571"
+CHKPT_NAME = "experiment_35epochs/mbt_student_val_loss_2917.26574"
 PKL_PATH = f"saved_models/{CHKPT_NAME}.pkl"
 
 def label_to_human_readable(label_tensor: torch.tensor) -> List[str]:
@@ -62,7 +62,7 @@ def get_tsne_points(embeddings: np.ndarray) -> np.ndarray:
     return tsne_points
 
 
-def do_inference(dataset_path: str, model_path: str) -> Tuple[np.ndarray, List[List[str]]]:
+def do_inference_and_save_embeddings(dataset_path: str, model_path: str) -> Tuple[np.ndarray, List[List[str]]]:
     _, _, test_dl  = load_data(dataset_path, 
                                 batch_sz=BATCH_SZ,
                                 train_val_test_split=[0.8, 0.1, 0.1])
@@ -72,8 +72,6 @@ def do_inference(dataset_path: str, model_path: str) -> Tuple[np.ndarray, List[L
     struct = {"embeddings": embeddings, "labels": labels}
     with open(PKL_PATH, "wb") as fh:
         pickle.dump(struct, fh)
-    points2d = get_tsne_points(embeddings)
-    return points2d, labels
 
 
 if __name__ == "__main__":
@@ -86,4 +84,4 @@ if __name__ == "__main__":
     #     for video_batch, audio_batch in zip(data["student_rgb"], data["student_spec"]):
     #         for label in data["labels"]:
     #             labels.append(label_to_human_readable(label.squeeze(0)))
-    points2d, labels = do_inference(dataset, f"saved_models/{CHKPT_NAME}.pth")
+    do_inference_and_save_embeddings(dataset, f"saved_models/{CHKPT_NAME}.pth")
