@@ -10,7 +10,16 @@ def cross_entropy_loss_with_centering(teacher_output, student_output, centre):
     teacher_output = teacher_output.detach() # stop gradient
     s = nn.Softmax()(student_output / TEMP_STUDENT)
     t = nn.Softmax()((teacher_output - centre) / TEMP_TEACHER)
-    return -(t * torch.log(s)).sum().mean()
+    loss = -(t * torch.log(s)).sum().mean()
+    if torch.isnan(loss).any():
+        ln = torch.log(s)
+        mln = t * ln 
+        smln = mln.sum()
+        msmln = smln.mean()
+        nmsmln = -msmln
+        breakpoint()
+        exit()
+    return loss
 
 
 def multicrop_loss(teacher_outputs: List[torch.tensor] , student_outputs: List[torch.tensor], centre: torch.tensor):
