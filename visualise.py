@@ -12,7 +12,7 @@ from data import load_data
 from vitmbt import ViTMBT
 from constants import *
 
-CHKPT_NAME = "experiment_35epochs/mbt_student_val_loss_2917.26574"
+CHKPT_NAME = "experiment3_110_epochs_cls-token/mbt_student_val_loss_0.00088"
 PKL_PATH = f"saved_models/{CHKPT_NAME}.pkl"
 
 def label_to_human_readable(label_tensor: torch.tensor) -> List[str]:
@@ -55,20 +55,18 @@ def get_embeddings_and_labels(dataloader: DataLoader, model: nn.Module) -> Tuple
 
 
 def get_tsne_points(embeddings: np.ndarray) -> np.ndarray:
-    # average out across emotions? and average out across bottleneck tokens?
     tsne = TSNE(n_components=2)
-    avg_embeddings = np.mean(embeddings, axis=1)
-    tsne_points = tsne.fit_transform(avg_embeddings)
+    tsne_points = tsne.fit_transform(embeddings)
     return tsne_points
 
 
 def do_inference_and_save_embeddings(dataset_path: str, model_path: str) -> Tuple[np.ndarray, List[List[str]]]:
-    _, _, test_dl  = load_data(dataset_path, 
+    train_dl, _, test_dl  = load_data(dataset_path, 
                                 batch_sz=BATCH_SZ,
                                 train_val_test_split=[0.8, 0.1, 0.1])
 
     model = load_model(model_path)
-    embeddings, labels = get_embeddings_and_labels(test_dl, model)
+    embeddings, labels = get_embeddings_and_labels(train_dl, model)
     struct = {"embeddings": embeddings, "labels": labels}
     with open(PKL_PATH, "wb") as fh:
         pickle.dump(struct, fh)
@@ -76,12 +74,4 @@ def do_inference_and_save_embeddings(dataset_path: str, model_path: str) -> Tupl
 
 if __name__ == "__main__":
     dataset = f"{DATA_DIR}/Labels/all_pruned.csv"
-    _, _, test_dl  = load_data(dataset, 
-                                batch_sz=BATCH_SZ,
-                                train_val_test_split=[0.8, 0.1, 0.1])
-    # labels = []
-    # for data in tqdm(test_dl):
-    #     for video_batch, audio_batch in zip(data["student_rgb"], data["student_spec"]):
-    #         for label in data["labels"]:
-    #             labels.append(label_to_human_readable(label.squeeze(0)))
     do_inference_and_save_embeddings(dataset, f"saved_models/{CHKPT_NAME}.pth")

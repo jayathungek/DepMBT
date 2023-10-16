@@ -1,4 +1,5 @@
 import sys
+import pickle
 from pprint import pformat
 from pathlib import Path
 import warnings
@@ -17,6 +18,7 @@ from data import load_data
 from constants import *
 from helpers import ClassifierMetrics
 from loss import multicrop_loss
+from visualise import get_embeddings_and_labels
 
 
 def parse_args(args):
@@ -48,7 +50,7 @@ train_dl, val_dl, test_dl  = load_data(f"{DATA_DIR}/Labels/all_pruned.csv",
                                        train_val_test_split=SPLIT)
 
 # only the student's weights are updated by the optimiser
-optimizer = torch.optim.AdamW(mbt_student.parameters(), betas=(0.9, 0.999), lr=LR, weight_decay=0.4)
+optimizer = torch.optim.AdamW(mbt_student.parameters(), betas=BETAS, lr=LR, weight_decay=WEIGHT_DECAY)
 
 scheduler = lrsch.SequentialLR(
     optimizer=optimizer,
@@ -73,6 +75,8 @@ best = {
     "warmup_epochs": WARMUP_EPOCHS,
     "epochs": EPOCHS,
     "T_0": T_0,
+    "weight_decay": WEIGHT_DECAY,
+    "betas": BETAS,
     "attn_dropout": ATTN_DROPOUT,
     "pt_attn_dropout": PT_ATTN_DROPOUT,
     "linear_dropout": LINEAR_DROPOUT,
@@ -97,7 +101,8 @@ best = {
     },
     "train": {
         "loss": None,
-    }
+    },
+    "checkpoint_name": None
 }
 
 with fpath_params.open("w") as fh:
@@ -115,15 +120,21 @@ for epoch in range(EPOCHS):
         )
 
 
-    if best["val"]["loss"] is None or (best["val"]["loss"] is not None and val_loss < best["val"]["loss"]): 
+    if best["val"]["loss"] is None or (best["val"]["loss"] is not None and val_loss <= best["val"]["loss"]): 
+        fname = f"mbt_student_val_loss_{val_loss:.5f}"
+        fpath_chkpt = save_path / f"{fname}.pth"
         best["T_0"] = T_0
         best["best_epoch"] = epoch + 1
         best["val"]["loss"] = val_loss
         best["train"]["loss"] = train_loss
-        fname = f"mbt_student_val_loss_{val_loss:.5f}"
-        fpath_chkpt = save_path / f"{fname}.pth"
+        best["checkpoint_name"] = fname
         torch.save(mbt_student.state_dict(), fpath_chkpt)
 
+
+embeddings, labels = get_embeddings_and_labels(val_dl, mbt_student)
+struct = {"embeddings": embeddings, "labels": labels}
+with open(f"{save_path}/{best['checkpoint_name']}.pkl", "wb") as fh:
+    pickle.dump(struct, fh)
 
 print(pformat(best))
 with open(RESULTS, "a") as fh:

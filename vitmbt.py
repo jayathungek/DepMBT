@@ -197,8 +197,9 @@ class ViTMBT(nn.Module):
             a = a[:, self.num_bottle_token:]
             v = v[:, self.num_bottle_token:]
 
-
-        return bottleneck_token
+        out = torch.cat((a[:, :1, :], v[:, :1, :]), dim=1) # concatenating the classification tokens
+        out = out.flatten(start_dim=1, end_dim=2)
+        return out
 
 def update_teacher_net_params(t, s):
     t_copy = t.state_dict().copy()
