@@ -18,7 +18,7 @@ from data import load_data
 from constants import *
 from helpers import ClassifierMetrics
 from loss import multicrop_loss
-from visualise import get_embeddings_and_labels
+from visualise import Visualiser
 from datasets import emoreact
 
 
@@ -130,7 +130,8 @@ for epoch in range(EPOCHS):
         torch.save(mbt_student.state_dict(), fpath_chkpt)
 
 
-embeddings, labels = get_embeddings_and_labels(val_dl, mbt_student)
+visualiser = Visualiser(emoreact)
+embeddings, labels = visualiser.get_embeddings_and_labels(val_dl, mbt_student)
 struct = {"embeddings": embeddings, "labels": labels}
 with open(f"{save_path}/{best['checkpoint_name']}.pkl", "wb") as fh:
     pickle.dump(struct, fh)
