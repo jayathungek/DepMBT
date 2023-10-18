@@ -7,7 +7,7 @@ from typing import List, Callable, Tuple
 
 from tqdm import tqdm
 
-from tokenizer import make_input
+from tokenizer import Tokenizer
 from constants import *
 
 def collect_filenames(path: str, ext: str):
@@ -69,6 +69,7 @@ class Manifest:
         self.constants = dataset_const_namespace
         self.dataset_root = Path(self.constants.DATA_DIR)
         self.manifest_fn = manifest_fn
+        self.tokenizer = Tokenizer(dataset_const_namespace)
     
     def create(self):
         mappings = self.manifest_fn(self.dataset_root)
@@ -85,10 +86,10 @@ class Manifest:
             filepath, *_ = row
             filepath = Path(filepath).resolve()
             try:
-                rgb, spec = make_input(filepath, self.constants.SAMPLING_RATE)
-                rgb = rgb.reshape((CHANS * self.constants.FRAMES, 
-                                    self.constants.HEIGHT, 
-                                    self.constants.WIDTH)
+                rgb, spec = self.tokenizer.make_input(filepath, self.constants.SAMPLING_RATE)
+                rgb = rgb.reshape((CHANS * FRAMES, 
+                                    HEIGHT, 
+                                    WIDTH)
                                 ).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
                 spec = spec.unsqueeze(0)
                 ok_lines.append(row)

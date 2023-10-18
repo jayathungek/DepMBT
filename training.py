@@ -19,7 +19,7 @@ from constants import *
 from helpers import ClassifierMetrics
 from loss import multicrop_loss
 from visualise import Visualiser
-from datasets import emoreact
+from datasets import emoreact, enterface
 
 
 def parse_args(args):
