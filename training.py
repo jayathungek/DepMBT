@@ -110,22 +110,20 @@ with fpath_params.open("w") as fh:
     fh.write(best_str)
     fh.write("\n")
 
+updated_centre = CENTRE_CONSTANT
 for epoch in range(EPOCHS):
-    train_loss, updated_centre = train(mbt_teacher, mbt_student, train_dl, optimizer, CENTRE_CONSTANT, loss_fn=multicrop_loss)
-    val_loss = val(mbt_teacher, mbt_student, val_dl, updated_centre, loss_fn=multicrop_loss)
+    train_loss, updated_centre = train(mbt_teacher, mbt_student, train_dl, optimizer, updated_centre, loss_fn=multicrop_loss)
+    # val_loss = val(mbt_teacher, mbt_student, val_dl, updated_centre, loss_fn=multicrop_loss)
     scheduler.step()
 
-    print(
-        (f"Epoch {epoch + 1}: train_loss {train_loss:.5f}, val_loss {val_loss:.5f}\n")
-        )
+    print(f"Epoch {epoch + 1}: train_loss {train_loss:.5f}\n")
 
 
-    if best["val"]["loss"] is None or (best["val"]["loss"] is not None and val_loss <= best["val"]["loss"]): 
-        fname = f"mbt_student_val_loss_{val_loss:.5f}"
+    if best["train"]["loss"] is None or (best["train"]["loss"] is not None and train_loss <= best["train"]["loss"]): 
+        fname = f"mbt_student_train_loss_{train_loss:.5f}"
         fpath_chkpt = save_path / f"{fname}.pth"
         best["T_0"] = T_0
         best["best_epoch"] = epoch + 1
-        best["val"]["loss"] = val_loss
         best["train"]["loss"] = train_loss
         best["checkpoint_name"] = fname
         torch.save(mbt_student.state_dict(), fpath_chkpt)
