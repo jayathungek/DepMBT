@@ -4,6 +4,7 @@ import csv
 from tqdm import tqdm
 from pathlib import Path
 from typing import List, Optional, Callable, Union
+from types import ModuleType
 
 import librosa
 import ffmpeg
@@ -72,6 +73,10 @@ class PatchEmbed(nn.Module):
         return x
 
 
+def normalize(arr: np.ndarray):
+    return arr / arr.max()
+
+
 def get_rgb_frames(video_path: str, ensure_frames_len: int = None) -> np.array:
     min_resize = 256
     new_width = "(iw/min(iw,ih))*{}".format(min_resize)
@@ -99,85 +104,6 @@ def get_rgb_frames(video_path: str, ensure_frames_len: int = None) -> np.array:
     return all_frames
 
 
-def normalize(arr: np.ndarray):
-    return arr / arr.max()
-
-
-def get_spectrogram(video_path: str, sampling_rate: int) -> io.BytesIO:
-    import matplotlib.pyplot as plt
-    from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-    from librosa import display as lrd
-    audio, sr = librosa.load(video_path, offset=0, duration=(10 - 0), sr=sampling_rate)
-    assert sampling_rate == sr, f"Sampling rate from file {sr} did not match settings sampling rate {sampling_rate}"
-    w_len = int(sampling_rate / 1000 * SPEC_WINDOW_SZ_MS) 
-    h_len = int(sampling_rate / 1000 * SPEC_HOP_LEN_MS)
-
-    S = librosa.feature.melspectrogram(y=audio,
-                                       fmin=0,
-                                       fmax=8000,
-                                       sr=sampling_rate,
-                                       n_mels=128,
-                                       hop_length=h_len,
-                                       win_length=w_len)
-
-    # Clamp the time dimension so it is a multiple of 100
-    _, time_steps = S.shape
-    time_steps = time_steps - (time_steps % 100)
-    S = S[:, 0:time_steps]
-
-    fig = plt.Figure()
-    canvas = FigureCanvas(fig)
-    ax = fig.add_subplot(111)
-    ax.set_axis_off()
-    p = lrd.specshow(librosa.power_to_db(S, ref=np.max),
-                     sr=sampling_rate,
-                     hop_length=h_len,
-                     win_length=w_len,
-                     fmin=0,
-                     fmax=8000,
-                     ax=ax,
-                     auto_aspect=False,
-                     y_axis='mel',
-                     x_axis='time')
-    img_data = io.BytesIO()
-    fig.savefig(img_data, bbox_inches='tight', pad_inches=0)
-    return img_data
-
-
-RGB_TRANSFORM = transforms.Compose([
-    CropFace(size=WIDTH, margin=FACE_MARGIN)
-])
-
-SPEC_TRANSFORM = transforms.Compose([
-    transforms.Resize((WIDTH, HEIGHT)),
-    transforms.PILToTensor()
-])
-
-
-def make_rgb_input(file: str) -> np.ndarray:
-    frames = get_rgb_frames(file, ensure_frames_len=FRAMES)
-    tensor_frames = [
-        RGB_TRANSFORM(
-            Image.open(io.BytesIO(vid_frame))            
-        ) for vid_frame in frames]
-    # .permute(2, 1, 0)
-    if DEBUG:
-        with open("midframe.jpeg", "wb") as fh:
-            fh.write(frames[5])
-    return np.stack(tensor_frames, axis=0)
-
-
-def make_spec_input(file: str, sampling_rate: int) -> np.ndarray:
-    # output shape: 1, 1000, 128, 3
-    mspec = get_spectrogram(file, sampling_rate)
-    # COPY SINGLE CHANNEL TO 3 CHANNELS
-    spec_tensor = SPEC_TRANSFORM(Image.open(mspec))
-    spec_tensor = spec_tensor[:3, :, :] # remove alpha channel and normalise
-    # if DEBUG:
-    #     torchvision.utils.save_image(spec_tensor, "spec_test1.bmp")
-    return spec_tensor
-
-
 def pos_embed(x, num_patches, embed_dim):
     # original timm, JAX, and deit vit impl
     # pos_embed has entry for class token, concat then add
@@ -190,81 +116,123 @@ def pos_embed(x, num_patches, embed_dim):
     return x
 
 
-def make_input(file: str, sampling_rate: int):
-    rgb_norm, spec_norm = normalize(np.array(make_rgb_input(file))), normalize(np.array(make_spec_input(file, sampling_rate)))
-    return torch.from_numpy(rgb_norm).float(), torch.from_numpy(spec_norm).float()
+class Tokenizer:
+    def __init__(self, dataset_const_namespace: ModuleType):
+        self.constants = dataset_const_namespace
+        self.rgb_transform = transforms.Compose([
+            CropFace(size=WIDTH, margin=self.constants.FACE_MARGIN)
+        ])
+
+        self.spec_transform = transforms.Compose([
+            transforms.Resize((WIDTH, HEIGHT)),
+            transforms.PILToTensor()
+        ])
 
 
-def make_input_test(file: str, sampling_rate: int):
-    rgb_norm, spec_norm = normalize(np.array(make_rgb_input(file))), normalize(make_mfcc_input(file, sampling_rate))
-    return torch.from_numpy(rgb_norm).float(), torch.from_numpy(spec_norm).float()
-
-def prune_manifest(manifest_filepath):
-    """
-    runs the video files in the manifest through the pre-processing pipeline
-    and excludes any failures from the final manifest
-    """
-    failed = 0
-    ok_lines = []
-    manifest_filepath = Path(manifest_filepath).resolve()
-    with open(manifest_filepath, "r") as fh:
-        reader = csv.reader(fh)
-        for row in tqdm(reader):
-            filepath, _, _, _, _, _, _, _, _, _ = row
-            filepath = Path(filepath).resolve()
-            try:
-                rgb, spec = make_input(filepath, SAMPLING_RATE)
-                rgb = rgb.reshape((CHANS * FRAMES, HEIGHT, WIDTH)).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
-                spec = spec.unsqueeze(0)
-                ok_lines.append([row])
-            except Exception as e:
-                print(f"Failed to process {filepath.name}: {e}")
-                failed += 1
-    
-    dest = f"{manifest_filepath.parent / manifest_filepath.stem}_pruned.csv"
-    with open(dest, "w") as fh:
-        writer = csv.writer(fh)
-        writer.writerows(ok_lines)
-        print(f"Wrote {len(ok_lines)} rows to {dest}, {failed} failed.")
 
 
-def make_mfcc_input(file: str, sampling_rate: int) -> np.ndarray:
-    audio, sr = librosa.load(file, sr=sampling_rate, duration=MAX_AUDIO_TIME_SEC)
-    assert sampling_rate == sr, f"Sampling rate from file {sr} did not match settings sampling rate {sampling_rate}"
-    w_len = int(sampling_rate / 1000 * SPEC_WINDOW_SZ_MS)
-    h_len = int(sampling_rate / 1000 * SPEC_HOP_LEN_MS)
 
-    S = librosa.feature.melspectrogram(y=audio,
-                                       fmin=0,
-                                       fmax=8000,
-                                       sr=sampling_rate,
-                                       n_mels=128,
-                                       hop_length=h_len,
-                                       win_length=w_len)
+    def get_spectrogram(self, video_path: str, sampling_rate: int) -> io.BytesIO:
+        import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+        from librosa import display as lrd
+        audio, sr = librosa.load(video_path, offset=0, duration=(10 - 0), sr=sampling_rate)
+        assert sampling_rate == sr, f"Sampling rate from file {sr} did not match settings sampling rate {sampling_rate}"
+        w_len = int(sampling_rate / 1000 * self.constants.SPEC_WINDOW_SZ_MS) 
+        h_len = int(sampling_rate / 1000 * self.constants.SPEC_HOP_LEN_MS)
 
-    # Clamp the time dimension so it is a multiple of 10
-    _, time_steps = S.shape
-    time_steps = time_steps - (time_steps % 10)
-    S = S[:, 0:time_steps]
-    S =  librosa.power_to_db(S, ref=np.max)
-    return -S
+        S = librosa.feature.melspectrogram(y=audio,
+                                        fmin=0,
+                                        fmax=8000,
+                                        sr=sampling_rate,
+                                        n_mels=128,
+                                        hop_length=h_len,
+                                        win_length=w_len)
+
+        # Clamp the time dimension so it is a multiple of 100
+        _, time_steps = S.shape
+        time_steps = time_steps - (time_steps % 100)
+        S = S[:, 0:time_steps]
+
+        fig = plt.Figure()
+        canvas = FigureCanvas(fig)
+        ax = fig.add_subplot(111)
+        ax.set_axis_off()
+        p = lrd.specshow(librosa.power_to_db(S, ref=np.max),
+                        sr=sampling_rate,
+                        hop_length=h_len,
+                        win_length=w_len,
+                        fmin=0,
+                        fmax=8000,
+                        ax=ax,
+                        auto_aspect=False,
+                        y_axis='mel',
+                        x_axis='time')
+        img_data = io.BytesIO()
+        fig.savefig(img_data, bbox_inches='tight', pad_inches=0)
+        return img_data
+
+    def make_rgb_input(self, file: str) -> np.ndarray:
+        frames = get_rgb_frames(file, ensure_frames_len=FRAMES)
+        tensor_frames = [
+            self.rgb_transform(
+                Image.open(io.BytesIO(vid_frame))            
+            ) for vid_frame in frames]
+        # .permute(2, 1, 0)
+        if DEBUG:
+            with open("midframe.jpeg", "wb") as fh:
+                fh.write(frames[5])
+        return np.stack(tensor_frames, axis=0)
+
+    def make_spec_input(self, file: str, sampling_rate: int) -> np.ndarray:
+        # output shape: 1, 1000, 128, 3
+        mspec = self.get_spectrogram(file, sampling_rate)
+        # COPY SINGLE CHANNEL TO 3 CHANNELS
+        spec_tensor = self.spec_transform(Image.open(mspec))
+        spec_tensor = spec_tensor[:3, :, :] # remove alpha channel and normalise
+        return spec_tensor
+
+    def make_mfcc_input(self, file: str, sampling_rate: int) -> np.ndarray:
+        audio, sr = librosa.load(file, sr=sampling_rate, duration=self.constants.MAX_AUDIO_TIME_SEC)
+        assert sampling_rate == sr, f"Sampling rate from file {sr} did not match settings sampling rate {sampling_rate}"
+        w_len = int(sampling_rate / 1000 * self.constants.SPEC_WINDOW_SZ_MS)
+        h_len = int(sampling_rate / 1000 * self.constants.SPEC_HOP_LEN_MS)
+
+        S = librosa.feature.melspectrogram(y=audio,
+                                        fmin=0,
+                                        fmax=8000,
+                                        sr=sampling_rate,
+                                        n_mels=128,
+                                        hop_length=h_len,
+                                        win_length=w_len)
+
+        # Clamp the time dimension so it is a multiple of 10
+        _, time_steps = S.shape
+        time_steps = time_steps - (time_steps % 10)
+        S = S[:, 0:time_steps]
+        S =  librosa.power_to_db(S, ref=np.max)
+        return -S
+
+    def make_input(self, file: str, sampling_rate: int):
+        rgb_norm, spec_norm = normalize(np.array(self.make_rgb_input(file))), normalize(self.make_mfcc_input(file, sampling_rate))
+        return torch.from_numpy(rgb_norm).float(), torch.from_numpy(spec_norm).float()
     
 
 if __name__ == '__main__':
     from torch.nn.utils.rnn import pad_sequence
-    s =  torch.from_numpy(make_mfcc_input(f"{DS_BASE}/{TEST_FILE}", SAMPLING_RATE)).T
-    s2 = torch.from_numpy(make_mfcc_input(f"{DS_BASE}/{TEST_FILE}", SAMPLING_RATE)).T
-    seq = [s, s2]
-    print(seq[0].shape, seq[1].shape)
-    padding = (0, 0, 0, MAX_SPEC_SEQ_LEN - seq[0].shape[0])
-    seq[0] = nn.ConstantPad2d(padding, 0)(seq[0])
-    s = pad_sequence(seq, batch_first=True)
-    s = s.swapaxes(1, 2)
-    print(s.shape)
-    exit()
-    mfest = sys.argv[1]
-    prune_manifest(mfest)
-    exit()
+    # s =  torch.from_numpy(make_mfcc_input(f"{DS_BASE}/{TEST_FILE}", SAMPLING_RATE)).T
+    # s2 = torch.from_numpy(make_mfcc_input(f"{DS_BASE}/{TEST_FILE}", SAMPLING_RATE)).T
+    # seq = [s, s2]
+    # print(seq[0].shape, seq[1].shape)
+    # padding = (0, 0, 0, MAX_SPEC_SEQ_LEN - seq[0].shape[0])
+    # seq[0] = nn.ConstantPad2d(padding, 0)(seq[0])
+    # s = pad_sequence(seq, batch_first=True)
+    # s = s.swapaxes(1, 2)
+    # print(s.shape)
+    # exit()
+    # mfest = sys.argv[1]
+    # prune_manifest(mfest)
+    # exit()
     # filenames = ["zy8mUJijw3o.mp4", "zxxjPPEujvU.mp4", "zyGjrJfE_rg.mp4", "zyXa2tdBTGc.mp4", "zye7IPXojSc.mp4"]
 
     # rgb_batch_tensor = torch.FloatTensor(len(filenames), FRAMES*CHANS, HEIGHT, WIDTH)

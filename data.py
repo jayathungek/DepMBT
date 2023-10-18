@@ -1,4 +1,6 @@
 import os
+from types import ModuleType
+from pathlib import Path
 
 import pandas as pd
 import torch
@@ -11,15 +13,17 @@ import torch.nn as nn
 from torchvision import transforms
 import matplotlib.pyplot as plt
 
-from tokenizer import make_input, make_input_test
+from tokenizer import Tokenizer
 from multicrop import MultiCrop
 from constants import *
 
 
 
 class EmoDataset(Dataset):
-    def __init__(self, manifest_filepath, nlines, sole_emotion=None):
+    def __init__(self, dataset_const_namespace, nlines, sole_emotion=None):
         super(EmoDataset, self).__init__()
+        self.constants = dataset_const_namespace
+        manifest_filepath = Path(dataset_const_namespace.DATA_DIR) / f"{dataset_const_namespace.NAME}.csv"
         self.dataset = pd.read_csv(manifest_filepath, nrows=nlines)
         self.sole_emotion = sole_emotion
 
@@ -27,13 +31,15 @@ class EmoDataset(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, item):
-        if self.sole_emotion is None:
-            num_labels = 8
-            return self.dataset.iloc[item][0], [self.dataset.iloc[item][i] for i in range(1, num_labels + 1)]
+        if self.constants.MULTILABEL:
+            if self.sole_emotion is None:
+                return self.dataset.iloc[item][0], [self.dataset.iloc[item][i] for i in range(1, self.constants.NUM_LABELS + 1)]
+            else:
+                video_path = self.dataset.iloc[item][0]
+                label = self.dataset.iloc[item][self.sole_emotion]
+                return video_path, label
         else:
-            video_path = self.dataset.iloc[item][0]
-            label = self.dataset.iloc[item][self.sole_emotion]
-            return video_path, label
+            return self.dataset.iloc[item][0], self.dataset.iloc[item][1]
 
 
 
@@ -53,19 +59,21 @@ class DVlog(Dataset):
         return self.dataset[idx][0], self.dataset[idx][1], self.dataset[idx][2], self.length[idx]
 
 class Collate_fn:
-    def __init__(self):
+    def __init__(self, dataset_namespace: ModuleType):
+        self.dataset_constants = dataset_namespace
         self.multicrop_rgb = MultiCrop(image_size=(HEIGHT, WIDTH), num_global_views=NUM_GLOBAL_VIEWS, num_local_views=NUM_LOCAL_VIEWS)
-        self.multicrop_spec = MultiCrop(image_size=(NUM_MELS, MAX_SPEC_SEQ_LEN), num_global_views=NUM_GLOBAL_VIEWS, num_local_views=NUM_LOCAL_VIEWS)
+        self.multicrop_spec = MultiCrop(image_size=(NUM_MELS, self.dataset_constants.MAX_SPEC_SEQ_LEN), num_global_views=NUM_GLOBAL_VIEWS, num_local_views=NUM_LOCAL_VIEWS)
+        self.tokenizer = Tokenizer(dataset_namespace)
 
     def __call__(self, batch):
         rgb_batch_tensor = torch.FloatTensor(len(batch), FRAMES * CHANS, HEIGHT, WIDTH)
-        spec_batch_tensor = torch.FloatTensor(len(batch), CHANS, NUM_MELS, MAX_SPEC_SEQ_LEN)
-        label_batch_tensor = torch.LongTensor(len(batch), NUM_LABELS)
+        spec_batch_tensor = torch.FloatTensor(len(batch), CHANS, NUM_MELS, self.dataset_constants.MAX_SPEC_SEQ_LEN)
+        label_batch_tensor = torch.LongTensor(len(batch), self.dataset_constants.NUM_LABELS)
         rgb_tensor_list = []
         spec_tensor_list = []
         label_list = []
         for filename, label in batch:
-            rgb, spec = make_input_test(filename, SAMPLING_RATE)
+            rgb, spec = self.tokenizer.make_input(filename, self.dataset_constants.SAMPLING_RATE)
             rgb = rgb.reshape((CHANS * FRAMES, HEIGHT, WIDTH)).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
             label = torch.tensor([label], dtype=torch.long).unsqueeze(0)
             spec = spec.T
@@ -75,7 +83,7 @@ class Collate_fn:
 
 
         torch.cat(label_list, out=label_batch_tensor)
-        padding = (0, 0, 0, MAX_SPEC_SEQ_LEN - spec_tensor_list[0].shape[0])
+        padding = (0, 0, 0, self.dataset_constants.MAX_SPEC_SEQ_LEN - spec_tensor_list[0].shape[0])
         spec_tensor_list[0] = nn.ConstantPad2d(padding, 0)(spec_tensor_list[0])
         spec_batch_tensor = pad_sequence(spec_tensor_list, batch_first=True)
         spec_batch_tensor = spec_batch_tensor.swapaxes(1, 2)
@@ -92,10 +100,10 @@ class Collate_fn:
         } 
 
 
-def load_data(data_path, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1], nlines=None, se=None):
+def load_data(dataset_const_namespace, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1], nlines=None, se=None):
     # This is a convenience funtion that returns dataset splits of train, val and test according to the fractions specified in the arguments
     assert sum(train_val_test_split) == 1, "Train, val and test fractions should sum to 1!"  # Always a good idea to use static asserts when processing arguments that are passed in by a user!
-    dataset = EmoDataset(data_path, nlines=nlines, sole_emotion=se)
+    dataset = EmoDataset(dataset_const_namespace, nlines=nlines, sole_emotion=se)
     
     # This code generates the actual number of items that goes into each split using the user-supplied fractions
     tr_va_te = []
@@ -109,7 +117,7 @@ def load_data(data_path, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1], nlin
     
     # Use Pytorch DataLoader to load each split into memory. It's important to pass in our custom collate function, so it knows how to interpret the 
     # data and load it. num_workers tells the DataLoader how many CPU threads to use so that data can be loaded in parallel, which is faster
-    new_collate_fn = Collate_fn()
+    new_collate_fn = Collate_fn(dataset_const_namespace)
     if len(train_split) > 0:
         train_dl = DataLoader(train_split, 
                             batch_size=batch_sz, 
