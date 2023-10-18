@@ -12,7 +12,7 @@ from data import load_data
 from vitmbt import ViTMBT
 from constants import *
 
-CHKPT_NAME = "experiment3_110_epochs_cls-token/mbt_student_val_loss_0.00088"
+CHKPT_NAME = "experiment_7_epochs_cls-token_centre-fix/mbt_student_val_loss_0.06158"
 PKL_PATH = f"saved_models/{CHKPT_NAME}.pkl"
 
 def label_to_human_readable(label_tensor: torch.tensor) -> List[str]:
@@ -55,7 +55,7 @@ def get_embeddings_and_labels(dataloader: DataLoader, model: nn.Module) -> Tuple
 
 
 def get_tsne_points(embeddings: np.ndarray) -> np.ndarray:
-    tsne = TSNE(n_components=2)
+    tsne = TSNE(n_components=2, perplexity=50)
     tsne_points = tsne.fit_transform(embeddings)
     return tsne_points
 
@@ -63,7 +63,7 @@ def get_tsne_points(embeddings: np.ndarray) -> np.ndarray:
 def do_inference_and_save_embeddings(dataset_path: str, model_path: str) -> Tuple[np.ndarray, List[List[str]]]:
     train_dl, _, test_dl  = load_data(dataset_path, 
                                 batch_sz=BATCH_SZ,
-                                train_val_test_split=[0.8, 0.1, 0.1])
+                                train_val_test_split=[0.5, 0.5, 0])
 
     model = load_model(model_path)
     embeddings, labels = get_embeddings_and_labels(train_dl, model)
