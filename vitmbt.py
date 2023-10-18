@@ -82,7 +82,7 @@ class PretrainedAST(nn.Module):
         t_start = time.time()
         cfg = _cfg(pretrained_checkpoint_path)
 
-        self.model = VisionTransformer(in_chans=channels, no_embed_class=no_class, img_size=(NUM_MELS, self.ds_constants.MAX_SPEC_SEQ_LEN), attn_drop_rate=drop)
+        self.model = VisionTransformer(in_chans=channels, no_embed_class=no_class, img_size=(NUM_MELS, self.ds_constants.MAX_SPEC_SEQ_LEN), embed_layer=PatchEmbed, attn_drop_rate=drop)
         load_pretrained(self.model, pretrained_cfg=cfg)
         delta_t = time.time() - t_start
         print(f"Loaded successfully in {delta_t:.1f}s")
@@ -97,12 +97,12 @@ class PretrainedAST(nn.Module):
         return self.model.forward_features(x)
 
 class PretrainedViT(nn.Module):
-    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class, drop, embed_layer=PatchEmbed, img_size=(224, 224)):
+    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class, drop, img_size=(224, 224)):
         super().__init__()
         print(f"Loading {model_name}...")
         t_start = time.time()
         cfg = _cfg(pretrained_checkpoint_path)
-        self.model = VisionTransformer(img_size=img_size, in_chans=channels, no_embed_class=no_class, embed_layer=embed_layer, attn_drop_rate=drop)
+        self.model = VisionTransformer(img_size=img_size, in_chans=channels, no_embed_class=no_class, embed_layer=PatchEmbed, attn_drop_rate=drop)
         load_pretrained(self.model, pretrained_cfg=cfg)
         delta_t = time.time() - t_start
         print(f"Loaded successfully in {delta_t:.1f}s")
