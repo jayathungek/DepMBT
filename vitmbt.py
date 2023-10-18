@@ -75,13 +75,14 @@ def load_pretrained(
 
 
 class PretrainedAST(nn.Module):
-    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class, drop):
+    def __init__(self, dataset_const_namespace, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class, drop):
         super().__init__()
+        self.ds_constants = dataset_const_namespace
         print(f"Loading {model_name}...")
         t_start = time.time()
         cfg = _cfg(pretrained_checkpoint_path)
 
-        self.model = VisionTransformer(in_chans=channels, no_embed_class=no_class, img_size=(NUM_MELS, MAX_SPEC_SEQ_LEN), attn_drop_rate=drop)
+        self.model = VisionTransformer(in_chans=channels, no_embed_class=no_class, img_size=(NUM_MELS, self.ds_constants.MAX_SPEC_SEQ_LEN), embed_layer=PatchEmbed, attn_drop_rate=drop)
         load_pretrained(self.model, pretrained_cfg=cfg)
         delta_t = time.time() - t_start
         print(f"Loaded successfully in {delta_t:.1f}s")
@@ -96,12 +97,12 @@ class PretrainedAST(nn.Module):
         return self.model.forward_features(x)
 
 class PretrainedViT(nn.Module):
-    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class, drop, embed_layer=PatchEmbed, img_size=(224, 224)):
+    def __init__(self, pretrained_checkpoint_path, cutoff_layer, channels, model_name, no_class, drop, img_size=(224, 224)):
         super().__init__()
         print(f"Loading {model_name}...")
         t_start = time.time()
         cfg = _cfg(pretrained_checkpoint_path)
-        self.model = VisionTransformer(img_size=img_size, in_chans=channels, no_embed_class=no_class, embed_layer=embed_layer, attn_drop_rate=drop)
+        self.model = VisionTransformer(img_size=img_size, in_chans=channels, no_embed_class=no_class, embed_layer=PatchEmbed, attn_drop_rate=drop)
         load_pretrained(self.model, pretrained_cfg=cfg)
         delta_t = time.time() - t_start
         print(f"Loaded successfully in {delta_t:.1f}s")
@@ -134,9 +135,10 @@ def reset_weights(m: nn.Module, cutoff):
 # try and implement DropDim regularisation (https://ieeexplore.ieee.org/document/9670702)
 
 class ViTMBT(nn.Module):
-    def __init__(self, embed_dim, num_bottle_token=4, bottle_layer=12
+    def __init__(self, dataset_const_namespace, embed_dim, num_bottle_token=4, bottle_layer=12
                 , project_type='conv2d', num_head=4, attn_drop=0.1, linear_drop=0.1, pt_attn_drop=0.1, num_layers=14, num_class=8, no_class=True, freeze_first=10, apply_augmentation=False):
         super().__init__()
+        self.ds_constants = dataset_const_namespace
         self.num_class = num_class
         self.classification_threshold = 0.75
         self.num_modalities = 2
@@ -145,7 +147,7 @@ class ViTMBT(nn.Module):
         self.num_bottle_token = num_bottle_token
         self.num_multimodal_layers = num_layers - bottle_layer
         # make vision transformer layers be accessible via subscript
-        self.unimodal_audio = PretrainedAST(PRETRAINED_CHKPT, self.bottle_layer, 3, "audio layers", drop=pt_attn_drop, no_class=no_class)
+        self.unimodal_audio = PretrainedAST(self.ds_constants, PRETRAINED_CHKPT, self.bottle_layer, 3, "audio layers", drop=pt_attn_drop, no_class=no_class)
         self.unimodal_video = PretrainedViT(PRETRAINED_CHKPT, self.bottle_layer, 3 * FRAMES, "video layers", drop=pt_attn_drop, no_class=no_class)
         self.multimodal_audio = clones(Block(embed_dim, num_head, attn_drop=attn_drop, qk_norm=True), self.num_multimodal_layers)
         self.multimodal_video = clones(Block(embed_dim, num_head, attn_drop=attn_drop, qk_norm=True), self.num_multimodal_layers)
@@ -197,8 +199,9 @@ class ViTMBT(nn.Module):
             a = a[:, self.num_bottle_token:]
             v = v[:, self.num_bottle_token:]
 
-
-        return bottleneck_token
+        out = torch.cat((a[:, :1, :], v[:, :1, :]), dim=1) # concatenating the classification tokens
+        out = out.flatten(start_dim=1, end_dim=2)
+        return out
 
 def update_teacher_net_params(t, s):
     t_copy = t.state_dict().copy()
@@ -465,78 +468,3 @@ def val_video(net, valldr, loss_fn, cls_metrics):
             total_losses.update(loss.data.item(), labels.size(0))
     cls_metrics.avg()
     return total_losses.avg(), cls_metrics
-
-
-
-if __name__ == "__main__":
-    EPOCHS = 200
-    lr = 0.001
-    BATCH_SZ = 8
-    LABELS = 1
-    vmbt = ViTMBT(1024, num_class=LABELS)
-    vmbt = nn.DataParallel(vmbt).cuda()
-    train_ds = EmoDataset(f"{DATA_DIR}/Labels/train_labels_full_pruned.csv", nlines=None, sole_emotion=None) # emotion #4 scores very high
-    val_ds = EmoDataset(f"{DATA_DIR}/Labels/val_labels_full_pruned.csv", nlines=50, sole_emotion=None)
-    test_ds = EmoDataset(f"{DATA_DIR}/Labels/test_labels_full_pruned.csv", nlines=None, sole_emotion=None)
-
-    train_metrics = ClassifierMetrics(task='binary', n_labels=LABELS, device=DEVICE)
-    val_metrics = ClassifierMetrics(task='binary', n_labels=LABELS, device=DEVICE)
-
-    new_collate_fn = Collate_fn()
-    train_dl = DataLoader(train_ds, collate_fn=new_collate_fn, batch_size=BATCH_SZ, shuffle=True)
-    val_dl = DataLoader(val_ds, collate_fn=new_collate_fn, batch_size=BATCH_SZ, shuffle=False)
-    test_dl = DataLoader(test_ds, collate_fn=new_collate_fn, batch_size=BATCH_SZ, shuffle=False)
-
-    optimizer = torch.optim.AdamW(vmbt.parameters(), betas=(0.9, 0.999), lr=lr, weight_decay=1.0 / BATCH_SZ)
-    # loss_func = BCELoss()
-    loss_func = nn.CrossEntropyLoss()
-
-    for epoch in range(EPOCHS):
-        train_metrics = train(vmbt, train_dl, optimizer, loss_fn=loss_func, cls_metrics=train_metrics)
-        train_loss, train_f1, train_r, train_p, train_acc, train_bottleneck_tokens = train_metrics
-        val_metrics = val(vmbt, val_dl, loss_fn=loss_func, cls_metrics=val_metrics)
-        val_loss, val_f1, val_r, val_p, val_acc, val_bottleneck_tokens = val_metrics
-        train_token = train_bottleneck_tokens[0][:, :256]
-        val_token = val_bottleneck_tokens[0][:, :256]
-
-        print(
-            (f"Epoch {epoch + 1}: train_loss {train_loss:.5f}, val_loss {val_loss:.5f}\n"
-                f"                   train_precision {train_p}, val_precision {val_p}\n"
-                f"                   train_recall {train_r}, val_recall {val_r}\n"
-                f"                   train_f1 {train_f1}, val_f1 {val_f1}"
-                )
-            )
-    
-
-
-
-    exit()
-    pvt = PretrainedViT(PRETRAINED_CHKPT, 8, "audio layers")
-
-    img = Image.open("dog.jpg").convert('RGB')
-
-    config = {
-        'input_size': (3, 224, 224), 
-        'interpolation': 'bicubic',
-        'mean': (0.5, 0.5, 0.5), 
-        'std': (0.5, 0.5, 0.5),
-        'crop_pct': 0.9, 'crop_mode': 'center'
-    }
-    transform = create_transform(**config)
-    tensor = transform(img).unsqueeze(0)  # transform and add batch dimension
-
-    with torch.no_grad():
-        out = pvt(tensor)
-        print(out.shape)
-    probabilities = torch.nn.functional.softmax(out[0], dim=0)
-    print(probabilities.shape)
-    # prints: torch.Size([1000])
-
-    # Get imagenet class mappings
-    with open("imagenet_classes.txt", "r") as f:
-        categories = [s.strip() for s in f.readlines()]
-
-    # Print top categories per image
-    top5_prob, top5_catid = torch.topk(probabilities, 5)
-    for i in range(top5_prob.size(0)):
-        print(categories[top5_catid[i]], top5_prob[i].item())

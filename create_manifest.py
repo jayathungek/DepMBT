@@ -1,10 +1,14 @@
 import csv
+from types import ModuleType
 import pandas as pd
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Callable, Tuple
 
 from tqdm import tqdm
+
+from tokenizer import Tokenizer
+from constants import *
 
 def collect_filenames(path: str, ext: str):
     return list(Path(path).glob(f"*.{ext}"))
@@ -55,8 +59,55 @@ def append_cols_right(file1, file1_header, file2, file2_header, data_dir, outfil
     joined.to_csv(outfile, index=False)
     
 
+class Manifest:
+    def __init__(self, 
+                 manifest_fn: Callable, 
+                 dataset_const_namespace: ModuleType,
+                 ) -> None:
+        self.path_label_mappings: List[Tuple] # first item in tuple is filepath, rest are labels
+
+        self.constants = dataset_const_namespace
+        self.dataset_root = Path(self.constants.DATA_DIR)
+        self.manifest_fn = manifest_fn
+        self.tokenizer = Tokenizer(dataset_const_namespace)
+    
+    def create(self):
+        mappings = self.manifest_fn(self.dataset_root)
+        self.prune_and_save(mappings)
+
+    def prune_and_save(self, path_label_mappings):
+        """
+        runs the video files in the manifest through the pre-processing pipeline
+        and excludes any failures from the final manifest
+        """
+        failed = 0
+        ok_lines = []
+        for row in tqdm(path_label_mappings):
+            filepath, *_ = row
+            filepath = Path(filepath).resolve()
+            try:
+                rgb, spec = self.tokenizer.make_input(filepath, self.constants.SAMPLING_RATE)
+                rgb = rgb.reshape((CHANS * FRAMES, 
+                                    HEIGHT, 
+                                    WIDTH)
+                                ).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
+                spec = spec.unsqueeze(0)
+                ok_lines.append(row)
+            except Exception as e:
+                print(f"Failed to process {filepath}: {e}")
+                failed += 1
+        
+        dest = self.dataset_root / f"{self.constants.NAME}_pruned.csv"
+        with open(dest, "w") as fh:
+            writer = csv.writer(fh)
+            writer.writerows(ok_lines)
+            print(f"Wrote {len(ok_lines)} rows to {dest}, {failed} failed.")
 
 if __name__ == '__main__':
+    from datasets import enterface, enterface_manifest_fn
+    m = Manifest(enterface_manifest_fn, enterface)
+    m.create()
+    exit()
     BASE_DIR = "/root/intelpa-1/datasets/EmoReact/EmoReact_V_1.0"
     f1 = Path(BASE_DIR) / "Labels" / sys.argv[1]
     f2 = Path(BASE_DIR) / "Labels" / sys.argv[2]
