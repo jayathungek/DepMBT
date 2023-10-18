@@ -26,3 +26,7 @@ dependencies:
       - lightning_utilities
       - plotly
       - nbformat
+
+# /root/miniconda/envs/depmbt/lib/python3.9/site-packages/timm/layers/pos_embed.py 
+# Change line 42 to 
+# posemb = F.interpolate(posemb, size=new_size, mode=interpolation, align_corners=True)
