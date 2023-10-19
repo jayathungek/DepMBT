@@ -23,7 +23,7 @@ class EmoDataset(Dataset):
     def __init__(self, dataset_const_namespace, nlines, sole_emotion=None):
         super(EmoDataset, self).__init__()
         self.constants = dataset_const_namespace
-        manifest_filepath = Path(dataset_const_namespace.DATA_DIR) / f"{dataset_const_namespace.NAME}.csv"
+        manifest_filepath = Path(dataset_const_namespace.DATA_DIR) / f"{dataset_const_namespace.NAME}_pruned.csv"
         self.dataset = pd.read_csv(manifest_filepath, nrows=nlines)
         self.sole_emotion = sole_emotion
 
@@ -83,6 +83,7 @@ class Collate_fn:
 
 
         torch.cat(label_list, out=label_batch_tensor)
+        torch.cat(rgb_tensor_list, out=rgb_batch_tensor)
         padding = (0, 0, 0, self.dataset_constants.MAX_SPEC_SEQ_LEN - spec_tensor_list[0].shape[0])
         spec_tensor_list[0] = nn.ConstantPad2d(padding, 0)(spec_tensor_list[0])
         spec_batch_tensor = pad_sequence(spec_tensor_list, batch_first=True)
@@ -183,22 +184,14 @@ def gen_dataset(rate, keep):
             pickle.dump(dataset[fold], handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__=="__main__":
-    # import argparse
-    # parser = argparse.ArgumentParser(description='Generate dataset')
-    # parser.add_argument('--rate', '-r', type=int, default=1, help='Downsample rate')
-    # parser.add_argument('--keep', '-', action='store_true', help='Keep all data in training set')
-    # args = parser.parse_args()
-    # gen_dataset(args.rate, args.keep)
-    ds = EmoDataset("/root/intelpa-1/datasets/EmoReact/EmoReact_V_1.0/Labels/all_pruned.csv", nlines=None, sole_emotion=None)
-    dl = DataLoader(ds, collate_fn=Collate_fn(), shuffle=True, batch_size=1)
+    from datasets import enterface
+    from tokenizer import save_video_frames_tensors
 
-    video_augmentations = nn.Sequential(
-        transforms.ColorJitter(),
-        transforms.GaussianBlur(),
-        transforms.RandomRotation(),
-        transforms.RandomHorizontalFlip(),
-        transforms.RandomInvert()
-    )
-    for audio, visual, label in dl:
-        print(audio.shape, visual.shape, label.shape)
-        plt.plot(visual)
+    BATCH_SZ = 3
+    SPLIT = [1, 0.0, 0.0]
+    dataset_to_use = enterface
+    train_dl, val_dl, test_dl  = load_data(dataset_to_use, 
+                                        batch_sz=BATCH_SZ,
+                                        train_val_test_split=SPLIT)
+    for data in train_dl:
+        pass
