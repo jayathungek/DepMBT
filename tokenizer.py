@@ -3,7 +3,7 @@ import sys
 import csv
 from tqdm import tqdm
 from pathlib import Path
-from typing import List, Optional, Callable, Union
+from typing import Optional, Callable, Union, List
 from types import ModuleType
 
 import librosa
@@ -11,7 +11,7 @@ import ffmpeg
 import numpy as np
 import torch
 from torch import nn
-import torchvision.utils
+from torchvision.utils import save_image
 from torchvision import transforms
 from PIL import Image
 
@@ -77,18 +77,18 @@ def normalize(arr: np.ndarray):
     return arr / arr.max()
 
 
-def get_rgb_frames(video_path: str, ensure_frames_len: int = None) -> np.array:
+def get_rgb_frames(video_path: str, ensure_frames_len: int=None, fps: int=1) -> np.array:
     min_resize = 256
     new_width = "(iw/min(iw,ih))*{}".format(min_resize)
     cmd = (
         ffmpeg
         .input(video_path)
         .trim(start=0, end=10)
-        .filter("fps", fps=1)
+        .filter("fps", fps=fps)
         .filter("scale", new_width, -1)
         .output("pipe:", format="image2pipe")
     )
-    jpeg_bytes, _ = cmd.run(capture_stdout=True, quiet=not DEBUG)
+    jpeg_bytes, _ = cmd.run(capture_stdout=True, quiet=True)
     jpeg_bytes = jpeg_bytes.split(JPEG_HEADER)[1:]
     jpeg_bytes = map(lambda x: JPEG_HEADER + x, jpeg_bytes)
     all_frames = list(jpeg_bytes)
@@ -103,17 +103,16 @@ def get_rgb_frames(video_path: str, ensure_frames_len: int = None) -> np.array:
                 print(f"get_rgb_frames: appended {diff} repeated frames to {video_path}")
     return all_frames
 
+def save_video_frames_bytes(frames: List[bytearray], save_dir: str):
+    newdir = Path(save_dir)
+    newdir.mkdir(parents=True, exist_ok=True)
+    for i, frame in enumerate(frames):
+        with open(newdir / f"{i}.jpeg", "wb") as fh:
+            frame = frame / 255.0
+            fh.write(frame)
 
-def pos_embed(x, num_patches, embed_dim):
-    # original timm, JAX, and deit vit impl
-    # pos_embed has entry for class token, concat then add
-    cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-    num_prefix_tokens = 1
-    embed_len = num_patches + num_prefix_tokens
-    pos_embed = nn.Parameter(torch.randn(1, embed_len, embed_dim) * .02)
-    x = torch.cat((cls_token.expand(x.shape[0], -1, -1), x), dim=1)
-    x = x + pos_embed
-    return x
+def save_video_frames_tensors(frames: torch.tensor, save_dir: str):
+    save_image(frames, fp=f"{save_dir}.jpg")
 
 
 class Tokenizer:
@@ -123,74 +122,17 @@ class Tokenizer:
             CropFace(size=WIDTH, margin=self.constants.FACE_MARGIN)
         ])
 
-        self.spec_transform = transforms.Compose([
-            transforms.Resize((WIDTH, HEIGHT)),
-            transforms.PILToTensor()
-        ])
-
-
-
-
-
-    def get_spectrogram(self, video_path: str, sampling_rate: int) -> io.BytesIO:
-        import matplotlib.pyplot as plt
-        from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-        from librosa import display as lrd
-        audio, sr = librosa.load(video_path, offset=0, duration=(10 - 0), sr=sampling_rate)
-        assert sampling_rate == sr, f"Sampling rate from file {sr} did not match settings sampling rate {sampling_rate}"
-        w_len = int(sampling_rate / 1000 * self.constants.SPEC_WINDOW_SZ_MS) 
-        h_len = int(sampling_rate / 1000 * self.constants.SPEC_HOP_LEN_MS)
-
-        S = librosa.feature.melspectrogram(y=audio,
-                                        fmin=0,
-                                        fmax=8000,
-                                        sr=sampling_rate,
-                                        n_mels=128,
-                                        hop_length=h_len,
-                                        win_length=w_len)
-
-        # Clamp the time dimension so it is a multiple of 100
-        _, time_steps = S.shape
-        time_steps = time_steps - (time_steps % 100)
-        S = S[:, 0:time_steps]
-
-        fig = plt.Figure()
-        canvas = FigureCanvas(fig)
-        ax = fig.add_subplot(111)
-        ax.set_axis_off()
-        p = lrd.specshow(librosa.power_to_db(S, ref=np.max),
-                        sr=sampling_rate,
-                        hop_length=h_len,
-                        win_length=w_len,
-                        fmin=0,
-                        fmax=8000,
-                        ax=ax,
-                        auto_aspect=False,
-                        y_axis='mel',
-                        x_axis='time')
-        img_data = io.BytesIO()
-        fig.savefig(img_data, bbox_inches='tight', pad_inches=0)
-        return img_data
-
     def make_rgb_input(self, file: str) -> np.ndarray:
-        frames = get_rgb_frames(file, ensure_frames_len=FRAMES)
+        frames = get_rgb_frames(file, ensure_frames_len=FRAMES, fps=self.constants.FPS)
         tensor_frames = [
             self.rgb_transform(
                 Image.open(io.BytesIO(vid_frame))            
             ) for vid_frame in frames]
-        # .permute(2, 1, 0)
+        stacked_frames = np.stack(tensor_frames, axis=0)
         if DEBUG:
-            with open("midframe.jpeg", "wb") as fh:
-                fh.write(frames[5])
-        return np.stack(tensor_frames, axis=0)
-
-    def make_spec_input(self, file: str, sampling_rate: int) -> np.ndarray:
-        # output shape: 1, 1000, 128, 3
-        mspec = self.get_spectrogram(file, sampling_rate)
-        # COPY SINGLE CHANNEL TO 3 CHANNELS
-        spec_tensor = self.spec_transform(Image.open(mspec))
-        spec_tensor = spec_tensor[:3, :, :] # remove alpha channel and normalise
-        return spec_tensor
+            pfile = Path(file)
+            save_video_frames_tensors(stacked_frames, f"{pfile.stem}")
+        return stacked_frames
 
     def make_mfcc_input(self, file: str, sampling_rate: int) -> np.ndarray:
         audio, sr = librosa.load(file, sr=sampling_rate, duration=self.constants.MAX_AUDIO_TIME_SEC)
@@ -219,44 +161,6 @@ class Tokenizer:
     
 
 if __name__ == '__main__':
-    from torch.nn.utils.rnn import pad_sequence
-    # s =  torch.from_numpy(make_mfcc_input(f"{DS_BASE}/{TEST_FILE}", SAMPLING_RATE)).T
-    # s2 = torch.from_numpy(make_mfcc_input(f"{DS_BASE}/{TEST_FILE}", SAMPLING_RATE)).T
-    # seq = [s, s2]
-    # print(seq[0].shape, seq[1].shape)
-    # padding = (0, 0, 0, MAX_SPEC_SEQ_LEN - seq[0].shape[0])
-    # seq[0] = nn.ConstantPad2d(padding, 0)(seq[0])
-    # s = pad_sequence(seq, batch_first=True)
-    # s = s.swapaxes(1, 2)
-    # print(s.shape)
-    # exit()
-    # mfest = sys.argv[1]
-    # prune_manifest(mfest)
-    # exit()
-    # filenames = ["zy8mUJijw3o.mp4", "zxxjPPEujvU.mp4", "zyGjrJfE_rg.mp4", "zyXa2tdBTGc.mp4", "zye7IPXojSc.mp4"]
-
-    # rgb_batch_tensor = torch.FloatTensor(len(filenames), FRAMES*CHANS, HEIGHT, WIDTH)
-    # spec_batch_tensor = torch.FloatTensor(len(filenames), CHANS, SPEC_HEIGHT, SPEC_WIDTH)
-    # rgb_tensor_list = []
-    # spec_tensor_list = []
-    # for filename in filenames:
-    #     rgb, spec = make_input(f"{DS_BASE}/{filename}", SAMPLING_RATE)
-    #     rgb = rgb.reshape((CHANS * FRAMES, HEIGHT, WIDTH)).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
-    #     rgb_tensor_list.append(rgb)
-    #     spec = spec.unsqueeze(0)
-    #     spec_tensor_list.append(spec)
-
-    # torch.cat(rgb_tensor_list, out=rgb_batch_tensor)
-    # torch.cat(spec_tensor_list, out=spec_batch_tensor)
-    # print(rgb_batch_tensor.shape, spec_batch_tensor.shape)
-    # exit()
-
-    # patch_embed = PatchEmbed()
-    # patch_embed_spec = PatchEmbed(img_size=(128, 800), num_frames=1)
-    # rgb = patch_embed(rgb)
-    # spec = patch_embed_spec(spec)
-    # rgb = pos_embed(rgb, num_patches=patch_embed.num_patches, embed_dim=768)
-    # spec = pos_embed(spec, num_patches=patch_embed_spec.num_patches, embed_dim=768)
-    # mm_embedding = torch.cat([rgb, spec], dim=1)
-    # print(mm_embedding.shape)
-
+    from datasets import enterface
+    t = Tokenizer(enterface)
+    t.make_rgb_input(f"{enterface.DATA_DIR}/subject 1/anger/sentence 1/s1_an_1.avi")
