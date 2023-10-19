@@ -61,18 +61,16 @@ def append_cols_right(file1, file1_header, file2, file2_header, data_dir, outfil
 
 class Manifest:
     def __init__(self, 
-                 manifest_fn: Callable, 
                  dataset_const_namespace: ModuleType,
                  ) -> None:
         self.path_label_mappings: List[Tuple] # first item in tuple is filepath, rest are labels
 
         self.constants = dataset_const_namespace
         self.dataset_root = Path(self.constants.DATA_DIR)
-        self.manifest_fn = manifest_fn
         self.tokenizer = Tokenizer(dataset_const_namespace)
     
     def create(self):
-        mappings = self.manifest_fn(self.dataset_root)
+        mappings = self.constants.manifest_fn(self.dataset_root)
         self.prune_and_save(mappings)
 
     def prune_and_save(self, path_label_mappings):

@@ -1,3 +1,6 @@
+from pathlib import Path
+from typing import List, Tuple
+
 NAME = "emoreact"
 MULTILABEL = True
 
@@ -11,3 +14,7 @@ SPEC_HOP_LEN_MS   = 40
 MAX_AUDIO_TIME_SEC = 15
 DATA_DIR = "/root/intelpa-1/datasets/EmoReact/EmoReact_V_1.0"
 FACE_MARGIN = 60
+FPS = 1
+
+def manifest_fn(dataset_root: Path) -> List[Tuple]:
+    pass
