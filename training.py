@@ -22,6 +22,8 @@ from visualise import Visualiser
 from datasets import emoreact, enterface
 
 
+dataset_to_use = enterface
+
 def parse_args(args):
     parser = ArgumentParser()
     parser.add_argument("script")
@@ -40,13 +42,13 @@ save_path.mkdir(exist_ok=False)
 fpath_params = save_path / "hparams.txt"
 
 
-mbt_teacher = ViTMBT(emoreact, 1024, num_class=LABELS, no_class=False, bottle_layer=BOTTLE_LAYER, freeze_first=FREEZE_FIRST, num_layers=TOTAL_LAYERS, apply_augmentation=APPLY_AUG, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT)
+mbt_teacher = ViTMBT(dataset_to_use, 1024, num_class=LABELS, no_class=False, bottle_layer=BOTTLE_LAYER, freeze_first=FREEZE_FIRST, num_layers=TOTAL_LAYERS, apply_augmentation=APPLY_AUG, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT)
 mbt_teacher = nn.DataParallel(mbt_teacher).cuda()
 
-mbt_student = ViTMBT(emoreact, 1024, num_class=LABELS, no_class=False, bottle_layer=BOTTLE_LAYER, freeze_first=FREEZE_FIRST, num_layers=TOTAL_LAYERS, apply_augmentation=APPLY_AUG, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT)
+mbt_student = ViTMBT(dataset_to_use, 1024, num_class=LABELS, no_class=False, bottle_layer=BOTTLE_LAYER, freeze_first=FREEZE_FIRST, num_layers=TOTAL_LAYERS, apply_augmentation=APPLY_AUG, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT)
 mbt_student = nn.DataParallel(mbt_student).cuda()
 
-train_dl, val_dl, test_dl  = load_data(emoreact, 
+train_dl, val_dl, test_dl  = load_data(dataset_to_use, 
                                        batch_sz=BATCH_SZ,
                                        train_val_test_split=SPLIT)
 
@@ -130,7 +132,7 @@ for epoch in range(EPOCHS):
         torch.save(mbt_student.state_dict(), fpath_chkpt)
 
 
-visualiser = Visualiser(emoreact)
+visualiser = Visualiser(dataset_to_use)
 embeddings, labels = visualiser.get_embeddings_and_labels(val_dl, mbt_student)
 struct = {"embeddings": embeddings, "labels": labels}
 with open(f"{save_path}/{best['checkpoint_name']}.pkl", "wb") as fh:
