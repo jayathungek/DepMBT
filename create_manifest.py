@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from tokenizer import Tokenizer
 from constants import *
+from datasets import get_vid_duration
 
 def collect_filenames(path: str, ext: str):
     return list(Path(path).glob(f"*.{ext}"))
@@ -84,12 +85,14 @@ class Manifest:
             filepath, *_ = row
             filepath = Path(filepath).resolve()
             try:
-                rgb, spec = self.tokenizer.make_input(filepath, self.constants.SAMPLING_RATE)
+                duration = get_vid_duration(filepath)
+                rgb, spec = self.tokenizer.make_input(filepath, duration, self.constants.SAMPLING_RATE)
                 rgb = rgb.reshape((CHANS * FRAMES, 
                                     HEIGHT, 
                                     WIDTH)
                                 ).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
                 spec = spec.unsqueeze(0)
+                row.insert(1, f"{duration:.2f}")
                 ok_lines.append(row)
             except Exception as e:
                 print(f"Failed to process {filepath}: {e}")
@@ -102,8 +105,8 @@ class Manifest:
             print(f"Wrote {len(ok_lines)} rows to {dest}, {failed} failed.")
 
 if __name__ == '__main__':
-    from datasets import enterface, enterface_manifest_fn
-    m = Manifest(enterface_manifest_fn, enterface)
+    from datasets import enterface, emoreact
+    m = Manifest(enterface)
     m.create()
     exit()
     BASE_DIR = "/root/intelpa-1/datasets/EmoReact/EmoReact_V_1.0"

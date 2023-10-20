@@ -1,4 +1,5 @@
 import io
+import math
 import sys
 import csv
 from tqdm import tqdm
@@ -77,14 +78,14 @@ def normalize(arr: np.ndarray):
     return arr / arr.max()
 
 
-def get_rgb_frames(video_path: str, ensure_frames_len: int=None, fps: int=1) -> np.array:
+def get_rgb_frames(video_path: str, video_length: float, ensure_frames_len: int=None) -> np.array:
     min_resize = 256
     new_width = "(iw/min(iw,ih))*{}".format(min_resize)
     cmd = (
         ffmpeg
         .input(video_path)
         .trim(start=0, end=10)
-        .filter("fps", fps=fps)
+        .filter("fps", fps=math.ceil(FRAMES/video_length))
         .filter("scale", new_width, -1)
         .output("pipe:", format="image2pipe")
     )
@@ -111,8 +112,8 @@ def save_video_frames_bytes(frames: List[bytearray], save_dir: str):
             frame = frame / 255.0
             fh.write(frame)
 
-def save_video_frames_tensors(frames: torch.tensor, save_dir: str):
-    save_image(frames, fp=f"{save_dir}.jpg")
+def save_video_frames_tensors(frames: torch.tensor, save_dir: str, rows: int=2):
+    save_image(frames, fp=f"{save_dir}.jpg", nrow=rows)
 
 
 class Tokenizer:
@@ -122,8 +123,8 @@ class Tokenizer:
             CropFace(size=WIDTH, margin=self.constants.FACE_MARGIN)
         ])
 
-    def make_rgb_input(self, file: str) -> np.ndarray:
-        frames = get_rgb_frames(file, ensure_frames_len=FRAMES, fps=self.constants.FPS)
+    def make_rgb_input(self, file: str, video_len: float) -> np.ndarray:
+        frames = get_rgb_frames(file, video_len, ensure_frames_len=FRAMES)
         tensor_frames = [
             self.rgb_transform(
                 Image.open(io.BytesIO(vid_frame))            
@@ -155,8 +156,8 @@ class Tokenizer:
         S =  librosa.power_to_db(S, ref=np.max)
         return -S
 
-    def make_input(self, file: str, sampling_rate: int):
-        rgb_norm, spec_norm = normalize(np.array(self.make_rgb_input(file))), normalize(self.make_mfcc_input(file, sampling_rate))
+    def make_input(self, file: str, video_len: float, sampling_rate: int):
+        rgb_norm, spec_norm = normalize(np.array(self.make_rgb_input(file, video_len))), normalize(self.make_mfcc_input(file, sampling_rate))
         return torch.from_numpy(rgb_norm).float(), torch.from_numpy(spec_norm).float()
     
 

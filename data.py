@@ -33,13 +33,17 @@ class EmoDataset(Dataset):
     def __getitem__(self, item):
         if self.constants.MULTILABEL:
             if self.sole_emotion is None:
-                return self.dataset.iloc[item][0], [self.dataset.iloc[item][i] for i in range(1, self.constants.NUM_LABELS + 1)]
+                return (self.dataset.iloc[item][0], 
+                       self.dataset.iloc[item][1], 
+                       [self.dataset.iloc[item][i] for i in range(1, self.constants.NUM_LABELS + 2)]
+                )
             else:
                 video_path = self.dataset.iloc[item][0]
-                label = self.dataset.iloc[item][self.sole_emotion]
-                return video_path, label
+                video_len = self.dataset.iloc[item][1]
+                label = self.dataset.iloc[item][1 + self.sole_emotion]
+                return video_path, video_len, label
         else:
-            return self.dataset.iloc[item][0], self.dataset.iloc[item][1]
+            return self.dataset.iloc[item][0], self.dataset.iloc[item][1], self.dataset.iloc[item][2]
 
 
 
@@ -72,8 +76,8 @@ class Collate_fn:
         rgb_tensor_list = []
         spec_tensor_list = []
         label_list = []
-        for filename, label in batch:
-            rgb, spec = self.tokenizer.make_input(filename, self.dataset_constants.SAMPLING_RATE)
+        for filename, duration, label in batch:
+            rgb, spec = self.tokenizer.make_input(filename, float(duration), self.dataset_constants.SAMPLING_RATE)
             rgb = rgb.reshape((CHANS * FRAMES, HEIGHT, WIDTH)).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
             label = torch.tensor([label], dtype=torch.long).unsqueeze(0)
             spec = spec.T
