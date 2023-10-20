@@ -117,7 +117,12 @@ def load_data(dataset_const_namespace, batch_sz=16, train_val_test_split=[0.8, 0
         actual_count = round(actual_count)
         tr_va_te.append(actual_count)
     
-    # split dataset into train, val and test
+    # if there is a mismatch, make up the difference by adding it to train samples
+    ds_sum = len(dataset)
+    split_sum = sum(tr_va_te)
+    if ds_sum != split_sum:
+        diff = max(ds_sum, split_sum) - min(ds_sum, split_sum)
+        tr_va_te[0] += diff
     train_split, val_split, test_split = random_split(dataset, tr_va_te)
     
     # Use Pytorch DataLoader to load each split into memory. It's important to pass in our custom collate function, so it knows how to interpret the 
