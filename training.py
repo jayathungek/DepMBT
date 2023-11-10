@@ -3,7 +3,7 @@ import pickle
 from pprint import pformat
 from pathlib import Path
 import warnings
-from argparse import ArgumentParser
+import argparse
 warnings.filterwarnings('ignore')
 
 import torch
@@ -25,14 +25,27 @@ from datasets import emoreact, enterface
 dataset_to_use = enterface
 
 def parse_args(args):
-    parser = ArgumentParser()
+    parser = argparse.ArgumentParser()
     parser.add_argument("script")
     parser.add_argument("-n", "--name")
+    parser.add_argument("-t", "--visualise-train", default=False, action=argparse.BooleanOptionalAction)
     parsed = parser.parse_args(args)
     if parsed.name is None:
         print("Need model name: -n OR --name")
         exit(1)
     return parsed
+
+def save_visualisation(model, dataloader, ds_namespace, best_chkpt, save_dir, is_train_dl=False):
+    visualiser = Visualiser(ds_namespace)
+    embeddings, labels = visualiser.get_embeddings_and_labels(dataloader, model)
+    struct = {"embeddings": embeddings, "labels": labels}
+    with open(f"{save_dir}/{best_chkpt['checkpoint_name']}{'_TRAIN_POINTS' if is_train_dl else ''}.pkl", "wb") as fh:
+        pickle.dump(struct, fh)
+
+    with open(RESULTS, "a") as fh:
+        best_str = pformat(best_chkpt)
+        fh.write(best_str)
+        fh.write("\n")
 
 
 parsed_args = parse_args(sys.argv)
@@ -114,32 +127,28 @@ with fpath_params.open("w") as fh:
     fh.write("\n")
 
 updated_centre = CENTRE_CONSTANT
-for epoch in range(EPOCHS):
-    train_loss, updated_centre = train(mbt_teacher, mbt_student, train_dl, optimizer, updated_centre, loss_fn=multicrop_loss)
-    # val_loss = val(mbt_teacher, mbt_student, val_dl, updated_centre, loss_fn=multicrop_loss)
-    scheduler.step()
 
-    print(f"Epoch {epoch + 1}: train_loss {train_loss:.5f}\n")
+try:
+    for epoch in range(EPOCHS):
+        train_loss, updated_centre = train(mbt_teacher, mbt_student, train_dl, optimizer, updated_centre, loss_fn=multicrop_loss)
+        # val_loss = val(mbt_teacher, mbt_student, val_dl, updated_centre, loss_fn=multicrop_loss)
+        scheduler.step()
+        print(f"Epoch {epoch + 1}: train_loss {train_loss:.5f}\n")
 
-
-    if best["train"]["loss"] is None or (best["train"]["loss"] is not None and train_loss <= best["train"]["loss"]): 
-        fname = f"mbt_student_train_loss_{train_loss:.5f}"
-        fpath_chkpt = save_path / f"{fname}.pth"
-        best["T_0"] = T_0
-        best["best_epoch"] = epoch + 1
-        best["train"]["loss"] = train_loss
-        best["checkpoint_name"] = fname
-        torch.save(mbt_student.state_dict(), fpath_chkpt)
-
-
-visualiser = Visualiser(dataset_to_use)
-embeddings, labels = visualiser.get_embeddings_and_labels(val_dl, mbt_student)
-struct = {"embeddings": embeddings, "labels": labels}
-with open(f"{save_path}/{best['checkpoint_name']}.pkl", "wb") as fh:
-    pickle.dump(struct, fh)
-
-print(pformat(best))
-with open(RESULTS, "a") as fh:
-    best_str = pformat(best)
-    fh.write(best_str)
-    fh.write("\n")
+        if best["train"]["loss"] is None or (best["train"]["loss"] is not None and train_loss <= best["train"]["loss"]): 
+            fname = f"mbt_student_train_loss_{train_loss:.5f}"
+            fpath_chkpt = save_path / f"{fname}.pth"
+            best["T_0"] = T_0
+            best["best_epoch"] = epoch + 1
+            best["train"]["loss"] = train_loss
+            best["checkpoint_name"] = fname
+            torch.save(mbt_student.state_dict(), fpath_chkpt)
+except (Exception, KeyboardInterrupt) as e:
+    print(f"Fatal error: {e}")
+finally:
+    print(pformat(best))
+    print(f"Saving visualisation for best checkpoint {best['checkpoint_name']}")
+    if parsed_args.visualise_train:
+        save_visualisation(mbt_student, train_dl, dataset_to_use, best, save_path, parsed_args.visualise_train)
+    else:
+        save_visualisation(mbt_student, val_dl, dataset_to_use, best, save_path, parsed_args.visualise_train)
