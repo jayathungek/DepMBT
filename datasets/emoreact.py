@@ -6,6 +6,7 @@ NAME = "emoreact"
 MULTILABEL = True
 
 LABEL_MAPPINGS = ["Curiosity", "Uncertainty", "Excitement", "Happiness", "Surprise", "Disgust", "Fear", "Frustration"]
+LABEL_COLORS = ['green','yellow','blue','red','pink','black', 'purple', 'orange']
 NUM_LABELS = len(LABEL_MAPPINGS)
 MAX_SPEC_SEQ_LEN = 375
 SPEC_MAX_LEN = 1000 

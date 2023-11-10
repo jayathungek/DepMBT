@@ -6,6 +6,7 @@ NAME = "enterface"
 MULTILABEL = False
 
 LABEL_MAPPINGS = ["anger", "sadness", "disgust", "surprise", "happiness", "fear"]
+LABEL_COLORS = ['green','yellow','blue','red','pink','black']
 NUM_LABELS = len(LABEL_MAPPINGS)
 MAX_SPEC_SEQ_LEN = 125
 SPEC_MAX_LEN = 500 
