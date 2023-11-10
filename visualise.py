@@ -13,9 +13,10 @@ from data import load_data
 from vitmbt import ViTMBT
 from constants import *
 
-CHKPT_NAME = "experiment_7_epochs_cls-token_centre-fix/mbt_student_val_loss_0.06158"
+CHKPT_NAME = "enterface_test2/mbt_student_train_loss_0.00033"
 PKL_PATH = f"saved_models/{CHKPT_NAME}.pkl"
 
+# TODO: Implement Calinski-Harabasz Index algorithm to check the clustering performance 
 
 def get_tsne_points(embeddings: np.ndarray) -> np.ndarray:
     tsne = TSNE(n_components=2, perplexity=50)
@@ -29,8 +30,11 @@ class Visualiser:
 
     def label_to_human_readable(self, label_tensor: torch.tensor) -> List[str]:
         assert len(label_tensor.shape) == 1, f"tensor {label_tensor} has shape {label_tensor.shape}"
-        labels_readable = [self.ds_constants.LABEL_MAPPINGS[i] for i, item in 
-                            enumerate(label_tensor.tolist()) if item == 1]
+        if self.ds_constants.MULTILABEL:
+            labels_readable = [self.ds_constants.LABEL_MAPPINGS[i] for i, item in 
+                                enumerate(label_tensor.tolist()) if item == 1]
+        else:
+            labels_readable = [self.ds_constants.LABEL_MAPPINGS[i] for i in label_tensor.tolist()]
 
         if len(labels_readable) == 0:
             labels_readable = ["None"]
@@ -56,7 +60,8 @@ class Visualiser:
                     student_embedding = model(audio_batch, video_batch)
                     student_outputs.append(student_embedding)
                     for label in data["labels"]:
-                        labels.append(self.label_to_human_readable(label.squeeze(0)))
+                        flattened_labels = label.flatten()
+                        labels.append(self.label_to_human_readable(flattened_labels))
             
         sample_output = student_outputs[0][0]
         output_tensor = torch.FloatTensor(len(dataloader), *sample_output.shape).to(DEVICE)
@@ -79,6 +84,6 @@ class Visualiser:
 
 
 if __name__ == "__main__":
-    from datasets import emoreact
-    v = Visualiser(emoreact)
+    from datasets import emoreact, enterface
+    v = Visualiser(enterface)
     v.do_inference_and_save_embeddings(f"saved_models/{CHKPT_NAME}.pth")
