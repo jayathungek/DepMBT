@@ -18,7 +18,6 @@ from multicrop import MultiCrop
 from constants import *
 
 
-
 class EmoDataset(Dataset):
     def __init__(self, dataset_const_namespace, nlines, sole_emotion=None):
         super(EmoDataset, self).__init__()
@@ -65,8 +64,8 @@ class DVlog(Dataset):
 class Collate_fn:
     def __init__(self, dataset_namespace: ModuleType):
         self.dataset_constants = dataset_namespace
-        self.multicrop_rgb = MultiCrop(image_size=(HEIGHT, WIDTH), num_global_views=NUM_GLOBAL_VIEWS, num_local_views=NUM_LOCAL_VIEWS)
-        self.multicrop_spec = MultiCrop(image_size=(NUM_MELS, self.dataset_constants.MAX_SPEC_SEQ_LEN), num_global_views=NUM_GLOBAL_VIEWS, num_local_views=NUM_LOCAL_VIEWS)
+        self.multicrop_rgb = MultiCrop(image_size=(HEIGHT, WIDTH), num_global_views=NUM_GLOBAL_VIEWS, num_local_views=NUM_LOCAL_VIEWS, global_view_pct=GLOBAL_VIEW_PCT, local_view_pct=LOCAL_VIEW_PCT)
+        self.multicrop_spec = MultiCrop(image_size=(NUM_MELS, self.dataset_constants.MAX_SPEC_SEQ_LEN), num_global_views=NUM_GLOBAL_VIEWS, num_local_views=NUM_LOCAL_VIEWS, global_view_pct=GLOBAL_VIEW_PCT, local_view_pct=LOCAL_VIEW_PCT)
         self.tokenizer = Tokenizer(dataset_namespace)
 
     def __call__(self, batch):
