@@ -10,8 +10,6 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader, random_split
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn as nn
-from torchvision import transforms
-import matplotlib.pyplot as plt
 
 from tokenizer import Tokenizer
 from multicrop import MultiCrop
@@ -44,22 +42,6 @@ class EmoDataset(Dataset):
         else:
             return self.dataset.iloc[item][0], self.dataset.iloc[item][1], self.dataset.iloc[item][2]
 
-
-
-class DVlog(Dataset):
-    def __init__(self, filename):
-        super(DVlog, self).__init__()
-
-        with open(filename, 'rb') as handle:
-            self.dataset = pickle.load(handle)
-
-        self.length = [d[0].shape[0] for d in self.dataset]
-
-    def __len__(self):
-        return len(self.dataset)
-
-    def __getitem__(self, idx):
-        return self.dataset[idx][0], self.dataset[idx][1], self.dataset[idx][2], self.length[idx]
 
 class Collate_fn:
     def __init__(self, dataset_namespace: ModuleType):
