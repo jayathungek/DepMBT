@@ -1,5 +1,4 @@
 from typing import Tuple
-import torch
 import torch.nn as nn
 from torchvision import transforms as tfm
 
@@ -25,11 +24,11 @@ class MultiCrop(nn.Module):
         self.image_width = image_size[1]
         self.num_global_views = num_global_views
         self.num_local_views = num_local_views
-        self.global_view_height = int(self.image_height * GLOBAL_VIEW_PCT)
-        self.global_view_width = int(self.image_width * GLOBAL_VIEW_PCT)
+        self.global_view_height = int(self.image_height * global_view_pct)
+        self.global_view_width = int(self.image_width * global_view_pct)
 
-        self.local_view_height = int(self.image_height * LOCAL_VIEW_PCT)
-        self.local_view_width = int(self.image_width * LOCAL_VIEW_PCT)
+        self.local_view_height = int(self.image_height * local_view_pct)
+        self.local_view_width = int(self.image_width * local_view_pct)
 
         # Could also try tfm.RandomResizedCrop to fill to image size instead of pad
         self.crop_global = tfm.RandomCrop(size=(self.global_view_height, self.global_view_width))
@@ -74,4 +73,8 @@ class MultiCrop(nn.Module):
         for _ in range(self.num_local_views):
             local_views.append(self.crop_and_pad(batch, local=True))
 
-        return global_views, local_views
+        teacher_views = global_views
+        student_views = global_views.copy()
+        student_views.extend(local_views)
+
+        return teacher_views, student_views
