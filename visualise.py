@@ -13,8 +13,6 @@ from data import load_data
 from vitmbt import ViTMBT
 from constants import *
 
-CHKPT_NAME = "enterface_test2/mbt_student_train_loss_0.00033"
-PKL_PATH = f"saved_models/{CHKPT_NAME}.pkl"
 
 # TODO: Implement Calinski-Harabasz Index algorithm to check the clustering performance 
 
@@ -41,12 +39,13 @@ class Visualiser:
 
         return labels_readable
 
-    def load_model(self, path: str) -> nn.Module:
+    def load_model(self, path: str) -> (nn.Module, float):
         model= ViTMBT(self.ds_constants, 1024, num_class=LABELS, no_class=False, bottle_layer=BOTTLE_LAYER, freeze_first=FREEZE_FIRST, num_layers=TOTAL_LAYERS, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT)
         model = nn.DataParallel(model).cuda()
-        model.load_state_dict(torch.load(path))
+        save_items = torch.load(path)
+        model.load_state_dict(save_items["state_dict"])
         model.eval()
-        return model
+        return model, save_items["centre"]
 
 
     def get_embeddings_and_labels(self, dataloader: DataLoader, model: nn.Module) -> Tuple[np.ndarray, List[List[str]]]:
@@ -54,14 +53,17 @@ class Visualiser:
         labels = []
         with torch.no_grad():
             for data in tqdm(dataloader):
-                for video_batch, audio_batch in zip(data["student_rgb"], data["student_spec"]):
-                    video_batch = video_batch.to(DEVICE)
-                    audio_batch = audio_batch.to(DEVICE)
-                    student_embedding = model(audio_batch, video_batch)
-                    student_outputs.append(student_embedding)
-                    for label in data["labels"]:
-                        flattened_labels = label.flatten()
-                        labels.append(self.label_to_human_readable(flattened_labels))
+                # we only use the first item in the student crops, which is a global view of the 
+                # scene
+                video_batch, audio_batch = data["student_rgb"][0], data["student_spec"][0]
+                labels_batch = data["labels"]
+                video_batch = video_batch.to(DEVICE)
+                audio_batch = audio_batch.to(DEVICE)
+                student_embedding = model(audio_batch, video_batch)
+                student_outputs.append(student_embedding)
+                for label in labels_batch:
+                    flattened_labels = label.flatten()
+                    labels.append(self.label_to_human_readable(flattened_labels))
             
         sample_output = student_outputs[0][0]
         output_tensor = torch.FloatTensor(len(dataloader), *sample_output.shape).to(DEVICE)
@@ -85,5 +87,8 @@ class Visualiser:
 
 if __name__ == "__main__":
     from datasets import emoreact, enterface
+
+    CHKPT_NAME = "enterface_test5/mbt_student_train_loss_0.19820"
+    PKL_PATH = f"saved_models/{CHKPT_NAME}.pkl"
     v = Visualiser(enterface)
     v.do_inference_and_save_embeddings(f"saved_models/{CHKPT_NAME}.pth")
