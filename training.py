@@ -70,7 +70,7 @@ if __name__ == "__main__":
     mbt_student = ViTMBT(dataset_to_use, 1024, num_class=LABELS, no_class=False, bottle_layer=BOTTLE_LAYER, freeze_first=FREEZE_FIRST, num_layers=TOTAL_LAYERS, apply_augmentation=APPLY_AUG, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT)
     mbt_student = nn.DataParallel(mbt_student).cuda()
 
-    train_dl, val_dl, test_dl  = load_data(dataset_to_use, 
+    train_dl, val_dl, test_dl, split_seed = load_data(dataset_to_use, 
                                         batch_sz=BATCH_SZ,
                                         train_val_test_split=SPLIT)
 
@@ -120,6 +120,7 @@ if __name__ == "__main__":
         'global_view_pct': GLOBAL_VIEW_PCT,
         'local_view_pct': LOCAL_VIEW_PCT,
         "centre_constant": CENTRE_CONSTANT,
+        "split_seed": split_seed,
         "best_epoch": 0,
         "val": {
             "loss": None,
