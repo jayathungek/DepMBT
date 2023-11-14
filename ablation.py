@@ -4,7 +4,6 @@ import os
 import torch
 import pandas
 import argparse
-from data import DVlog
 from sam import SAM
 from helpers import *
 from mbt import MBT
@@ -127,26 +126,6 @@ def val(net, validldr, criteria):
     acc = accuracy_score(all_labels, all_y)
     cm = confusion_matrix(all_labels, all_y)
     return (total_losses.avg(), f1, r, p, acc, cm, bot_token)
-
-
-# def test(model, args, description):
-#     keep = 'k' if args.keep else ''
-#     testset = DVlog('{}test_{}{}.pickle'.format(args.datadir, keep, args.rate))
-#     # testset = EmoDataset(args.val_manifest)
-#     loss_fn = nn.CrossEntropyLoss()
-#     # testldr = DataLoader(testset, batch_size=args.batch, collate_fn=new_collate_fn, shuffle=False, num_workers=1)
-#     testldr = DataLoader(testset, batch_size=args.batch, collate_fn=collate_fn, shuffle=False, num_workers=1)
-
-#     if not isinstance(model, nn.Module):
-#         loaded = nn.DataParallel(MBT(25, 136, 256)).cuda()
-#         # net = MBT(1*3, 10*3, 256, project_type=proj_type)
-#         model = torch.load(model)
-#         state_dict = model["state_dict"]
-#         loaded.load_state_dict(state_dict)
-
-#     eval_return = val(loaded, testldr, loss_fn)
-#     print_eval_info(description, eval_return)
-
 
 
 def main():
