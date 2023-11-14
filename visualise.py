@@ -43,7 +43,7 @@ class Visualiser:
         model= ViTMBT(self.ds_constants, 1024, num_class=LABELS, no_class=False, bottle_layer=BOTTLE_LAYER, freeze_first=FREEZE_FIRST, num_layers=TOTAL_LAYERS, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT)
         model = nn.DataParallel(model).cuda()
         save_items = torch.load(path)
-        model.load_state_dict(save_items["state_dict"])
+        model.load_state_dict(save_items["student_state_dict"])
         model.eval()
         return model, save_items["centre"]
 
@@ -79,7 +79,7 @@ class Visualiser:
                                             train_val_test_split=[0.5, 0.5, 0],
                                             seed=split_seed)
 
-        model = self.load_model(model_path)
+        model, _ = self.load_model(model_path)
         embeddings, labels = self.get_embeddings_and_labels(train_dl, model)
         struct = {"embeddings": embeddings, "labels": labels}
         with open(PKL_PATH, "wb") as fh:
@@ -89,7 +89,7 @@ class Visualiser:
 if __name__ == "__main__":
     from datasets import emoreact, enterface
 
-    CHKPT_NAME = "enterface_test5/mbt_student_train_loss_0.19820"
+    CHKPT_NAME = "enterface_mbt/mbt_student_train_loss_0.01266"
     PKL_PATH = f"saved_models/{CHKPT_NAME}.pkl"
     v = Visualiser(enterface)
     v.do_inference_and_save_embeddings(f"saved_models/{CHKPT_NAME}.pth")
