@@ -1,4 +1,6 @@
 import os
+import sys
+import random
 from types import ModuleType
 from pathlib import Path
 
@@ -86,7 +88,7 @@ class Collate_fn:
         } 
 
 
-def load_data(dataset_const_namespace, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1], nlines=None, se=None):
+def load_data(dataset_const_namespace, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1], nlines=None, se=None, seed=None):
     # This is a convenience funtion that returns dataset splits of train, val and test according to the fractions specified in the arguments
     assert sum(train_val_test_split) == 1, "Train, val and test fractions should sum to 1!"  # Always a good idea to use static asserts when processing arguments that are passed in by a user!
     dataset = EmoDataset(dataset_const_namespace, nlines=nlines, sole_emotion=se)
@@ -104,7 +106,13 @@ def load_data(dataset_const_namespace, batch_sz=16, train_val_test_split=[0.8, 0
     if ds_sum != split_sum:
         diff = max(ds_sum, split_sum) - min(ds_sum, split_sum)
         tr_va_te[0] += diff
-    train_split, val_split, test_split = random_split(dataset, tr_va_te)
+
+    if seed:
+        split_seed = seed
+    else:
+        split_seed = random.randint(0, sys.maxsize)
+    generator = torch.Generator().manual_seed(split_seed)
+    train_split, val_split, test_split = random_split(dataset, tr_va_te, generator=generator)
     
     # Use Pytorch DataLoader to load each split into memory. It's important to pass in our custom collate function, so it knows how to interpret the 
     # data and load it. num_workers tells the DataLoader how many CPU threads to use so that data can be loaded in parallel, which is faster
@@ -133,7 +141,7 @@ def load_data(dataset_const_namespace, batch_sz=16, train_val_test_split=[0.8, 0
     else:
         test_dl = None
 
-    return train_dl, val_dl, test_dl
+    return train_dl, val_dl, test_dl, split_seed
 
 
 
@@ -180,8 +188,11 @@ if __name__=="__main__":
     BATCH_SZ = 3
     SPLIT = [1, 0.0, 0.0]
     dataset_to_use = enterface
-    train_dl, val_dl, test_dl  = load_data(dataset_to_use, 
+    train_dl, val_dl, test_dl, ss  = load_data(dataset_to_use, 
                                         batch_sz=BATCH_SZ,
-                                        train_val_test_split=SPLIT)
-    for data in train_dl:
-        pass
+                                        train_val_test_split=SPLIT,
+                                        seed=8294641842899686597)
+    
+    print(f"Seed: {ss}")
+    # for data in train_dl:
+    #     print(data["teacher_spec"][0][0][0][35])
