@@ -1,3 +1,4 @@
+import math
 import csv
 from types import ModuleType
 import pandas as pd
@@ -86,6 +87,7 @@ class Manifest:
             filepath = Path(filepath).resolve()
             try:
                 duration = get_vid_duration(filepath)
+                total_frames = math.floor(VIDEO_FPS * duration)
                 rgb, spec = self.tokenizer.make_input(filepath, duration, self.constants.SAMPLING_RATE)
                 rgb = rgb.reshape((CHANS * FRAMES, 
                                     HEIGHT, 
@@ -93,6 +95,7 @@ class Manifest:
                                 ).unsqueeze(0)  # f, c, h, w -> 1, c*f, h, w
                 spec = spec.unsqueeze(0)
                 row.insert(1, f"{duration:.2f}")
+                row.insert(2, f"{total_frames}")
                 ok_lines.append(row)
             except Exception as e:
                 print(f"Failed to process {filepath}: {e}")

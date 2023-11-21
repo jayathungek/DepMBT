@@ -81,11 +81,12 @@ def normalize(arr: np.ndarray):
 def get_rgb_frames(video_path: str, video_length: float, ensure_frames_len: int=None) -> np.array:
     min_resize = 256
     new_width = "(iw/min(iw,ih))*{}".format(min_resize)
+    fps = math.ceil(FRAMES/video_length) if ensure_frames_len else VIDEO_FPS
     cmd = (
         ffmpeg
         .input(video_path)
         .trim(start=0, end=10)
-        .filter("fps", fps=math.ceil(FRAMES/video_length))
+        .filter("fps", fps=fps)
         .filter("scale", new_width, -1)
         .output("pipe:", format="image2pipe")
     )
@@ -123,8 +124,8 @@ class Tokenizer:
             CropFace(size=WIDTH, margin=self.constants.FACE_MARGIN)
         ])
 
-    def make_rgb_input(self, file: str, video_len: float) -> np.ndarray:
-        frames = get_rgb_frames(file, video_len, ensure_frames_len=FRAMES)
+    def make_rgb_input(self, file: str, video_len: float, constant_fps: bool) -> np.ndarray:
+        frames = get_rgb_frames(file, video_len, ensure_frames_len=None if constant_fps else FRAMES)
         tensor_frames = [
             self.rgb_transform(
                 Image.open(io.BytesIO(vid_frame))            
@@ -156,12 +157,14 @@ class Tokenizer:
         S =  librosa.power_to_db(S, ref=np.max)
         return -S
 
-    def make_input(self, file: str, video_len: float, sampling_rate: int):
-        rgb_norm, spec_norm = normalize(np.array(self.make_rgb_input(file, video_len))), normalize(self.make_mfcc_input(file, sampling_rate))
+    def make_input(self, file: str, video_len: float, sampling_rate: int, constant_fps: bool=False):
+        rgb_norm, spec_norm = normalize(np.array(self.make_rgb_input(file, video_len, constant_fps))), normalize(self.make_mfcc_input(file, sampling_rate))
         return torch.from_numpy(rgb_norm).float(), torch.from_numpy(spec_norm).float()
     
 
 if __name__ == '__main__':
     from datasets import enterface
     t = Tokenizer(enterface)
-    t.make_rgb_input(f"{enterface.DATA_DIR}/subject 1/anger/sentence 1/s1_an_1.avi")
+    output = t.make_rgb_input(f"{enterface.DATA_DIR}/subject 33/anger/sentence 2/s33_an_2.avi", 0, True)
+    print(output.shape)
+    
