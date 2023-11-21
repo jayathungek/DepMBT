@@ -13,9 +13,7 @@ import torch.nn as nn
 from torch.nn import BCELoss
 import torch.optim.lr_scheduler as lrsch
 
-# from vitmbt import ViTAudio, train_audio as train, val_audio as val
-# from vitmbt import ViTVideo, train_video as train, val_video as val
-from vitmbt import ViTMBT, train, update_teacher_net_params
+from cnn import LateFusionCNN, train_multicrop
 from data import load_data
 from constants import *
 from helpers import ClassifierMetrics
@@ -64,15 +62,16 @@ def save_visualisation(model, dataloader, ds_namespace, best_chkpt, save_dir, is
 
 
 if __name__ == "__main__":
-    mbt_teacher = ViTMBT(dataset_to_use, 1024, num_class=LABELS, no_class=False, bottle_layer=BOTTLE_LAYER, freeze_first=FREEZE_FIRST, num_layers=TOTAL_LAYERS, apply_augmentation=APPLY_AUG, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT)
+    mbt_teacher = LateFusionCNN(enterface)
     mbt_teacher = nn.DataParallel(mbt_teacher).cuda()
 
-    mbt_student = ViTMBT(dataset_to_use, 1024, num_class=LABELS, no_class=False, bottle_layer=BOTTLE_LAYER, freeze_first=FREEZE_FIRST, num_layers=TOTAL_LAYERS, apply_augmentation=APPLY_AUG, attn_drop=ATTN_DROPOUT, linear_drop=LINEAR_DROPOUT)
+    mbt_student = LateFusionCNN(enterface)
     mbt_student = nn.DataParallel(mbt_student).cuda()
 
     train_dl, val_dl, test_dl, split_seed = load_data(dataset_to_use, 
                                         batch_sz=BATCH_SZ,
-                                        train_val_test_split=SPLIT)
+                                        train_val_test_split=SPLIT, 
+                                        force_audio_aspect=FORCE_AUDIO_ASPECT)
 
     # only the student's weights are updated by the optimiser
     optimizer = torch.optim.AdamW(mbt_student.parameters(), betas=BETAS, lr=LR, weight_decay=WEIGHT_DECAY)
@@ -121,6 +120,7 @@ if __name__ == "__main__":
         'local_view_pct': LOCAL_VIEW_PCT,
         "centre_constant": CENTRE_CONSTANT,
         "split_seed": split_seed,
+        "force_audio_aspect": FORCE_AUDIO_ASPECT,
         "best_epoch": 0,
         "val": {
             "loss": None,
@@ -159,8 +159,7 @@ if __name__ == "__main__":
         fh.write("\n")
     try:
         for epoch in range(EPOCHS):
-            train_loss, updated_centre = train(mbt_teacher, mbt_student, train_dl, optimizer, updated_centre, loss_fn=multicrop_loss)
-            # val_loss = val(mbt_teacher, mbt_student, val_dl, updated_centre, loss_fn=multicrop_loss)
+            train_loss, updated_centre = train_multicrop(mbt_teacher, mbt_student, train_dl, optimizer, updated_centre, loss_fn=multicrop_loss)
             scheduler.step()
             print(f"Epoch {epoch + 1}: train_loss {train_loss:.5f}\n")
 
