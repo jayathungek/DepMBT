@@ -5,6 +5,7 @@ from torchvision import transforms as tfm
 from constants import *
 
 
+# TODO: resize subcrops to image_size at end 
 class MultiCrop(nn.Module):
     """ 
     Module for generating multiple global and local views of a 2D image or 3D Volume
@@ -33,9 +34,6 @@ class MultiCrop(nn.Module):
         # Could also try tfm.RandomResizedCrop to fill to image size instead of pad
         self.crop_global = tfm.RandomCrop(size=(self.global_view_height, self.global_view_width))
         self.crop_local = tfm.RandomCrop(size=(self.local_view_height, self.local_view_width))
-        self.augment = tfm.Compose([
-            tfm.ColorJitter(),
-        ])
 
 
     def crop_and_pad(self, batch, local):
