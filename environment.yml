@@ -5,9 +5,12 @@ channels:
 dependencies:
     - python=3.9.16
     - numpy=1.23.1
+    - ffmpeg<7
     - pip=22.3.1
     - pip:
-      - https://download.pytorch.org/whl/cu113/torch-1.10.0%2Bcu113-cp39-cp39-linux_x86_64.whl
+      - https://download.pytorch.org/whl/cu117/torchaudio-2.0.1%2Bcu117-cp39-cp39-linux_x86_64.whl --no-deps
+      - https://download.pytorch.org/whl/cu117/torchvision-0.15.1%2Bcu117-cp39-cp39-linux_x86_64.whl --no-deps
+      - https://download.pytorch.org/whl/cu117/torch-2.0.0%2Bcu117-cp39-cp39-linux_x86_64.whl
       - git+https://github.com/huggingface/pytorch-image-models.git@cb3f9c23bb31d234609711f06835724a8f0ee7da
       - facenet-pytorch==2.5.3
       - ffmpeg-python==0.2.0
