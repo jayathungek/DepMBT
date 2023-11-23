@@ -215,19 +215,6 @@ class Collate_Constrastive:
             spec_batch_tensor2 = spec_batch_tensor2.swapaxes(1, 2)
             spec_batch_tensor1 = spec_batch_tensor1.unsqueeze(1).repeat(1, 3, 1, 1)
             spec_batch_tensor2 = spec_batch_tensor2.unsqueeze(1).repeat(1, 3, 1, 1)
-        # else:
-            # torch.cat(
-            #     [self.audio_transform(s.unsqueeze(0)) for s in spec_tensor_list1],
-            #     dim=0,
-            #     out=spec_batch_tensor1
-            # )
-            # torch.cat(
-            #     [self.audio_transform(s.unsqueeze(0)) for s in spec_tensor_list2],
-            #     dim=0,
-            #     out=spec_batch_tensor2
-            # )
-            # spec_batch_tensor1 = spec_batch_tensor1.repeat(1, 3, 1, 1)
-            # spec_batch_tensor2 = spec_batch_tensor2.repeat(1, 3, 1, 1)
 
         return {
             "rgb_clip1": rgb_batch_tensor1,

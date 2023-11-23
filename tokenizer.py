@@ -13,6 +13,7 @@ import numpy as np
 import torch
 from torch import nn
 from torchvision.utils import save_image
+import torchaudio
 from torchvision import transforms
 from PIL import Image
 
@@ -78,10 +79,32 @@ def normalize(arr: np.ndarray):
     return arr / arr.max()
 
 
-def get_rgb_frames(video_path: str, video_length: float, ensure_frames_len: int=None) -> np.array:
+#TODO: write tests for this
+def get_clip_start_frames(total_frames: int, clip_length: int):
+    max_dist = total_frames - (2 * clip_length)
+    frames = np.arange(max_dist, dtype=float)
+    probs = frames/frames.sum()
+    probs = -probs + probs[-1]
+    dist = np.random.choice(frames, 1, p = probs)[0]
+    s1_choices = np.arange(0, total_frames - (2 * clip_length) - dist) 
+    s1 = np.random.choice(s1_choices, 1)[0]
+    s2 = s1 + clip_length + dist
+    return int(s1), int(s2)
+
+
+def sample_clip(self, rgb_frames: List):
+    start1, start2 = get_clip_start_frames(len(rgb_frames), FRAMES)
+    snippet1 = rgb_frames[start1 : start1 + FRAMES]
+    snippet2 = rgb_frames[start2 : start2 + FRAMES]
+    assert len(snippet1) == len(snippet2) == FRAMES, f"snippets are of different sizes: {len(snippet1)}, {len(snippet2)}"
+    return snippet1, snippet2
+    
+
+def get_rgb_frames(video_path: str, video_length: float, ensure_frames_len: int=None, video_fps: int=None) -> List:
+    assert (ensure_frames_len is None) ^ (video_fps is None), "Either ensure_frames_len or video_fps must be set (XOR)"
     min_resize = 256
     new_width = "(iw/min(iw,ih))*{}".format(min_resize)
-    fps = math.ceil(FRAMES/video_length) if ensure_frames_len else VIDEO_FPS
+    fps = math.ceil(FRAMES/video_length) if ensure_frames_len else video_fps
     cmd = (
         ffmpeg
         .input(video_path)
@@ -105,6 +128,13 @@ def get_rgb_frames(video_path: str, video_length: float, ensure_frames_len: int=
                 print(f"get_rgb_frames: appended {diff} repeated frames to {video_path}")
     return all_frames
 
+
+def make_audio_input(file):
+    samples, _ = torchaudio.load(file, normalize=True)
+    samples = samples[0] # use only 1 channel, for simplicity
+    return samples.squeeze(0)
+
+
 def save_video_frames_bytes(frames: List[bytearray], save_dir: str):
     newdir = Path(save_dir)
     newdir.mkdir(parents=True, exist_ok=True)
@@ -117,6 +147,10 @@ def save_video_frames_tensors(frames: torch.tensor, save_dir: str, rows: int=2):
     save_image(frames, fp=f"{save_dir}.jpg", nrow=rows)
 
 
+def  frame_offset_to_timestamp(frame_offset: int, fps: int) -> float:
+    return frame_offset * (1 / fps)
+
+
 class Tokenizer:
     def __init__(self, dataset_const_namespace: ModuleType):
         self.constants = dataset_const_namespace
@@ -124,8 +158,28 @@ class Tokenizer:
             CropFace(size=WIDTH, margin=self.constants.FACE_MARGIN)
         ])
 
+        
     def make_rgb_input(self, file: str, video_len: float, constant_fps: bool) -> np.ndarray:
-        frames = get_rgb_frames(file, video_len, ensure_frames_len=None if constant_fps else FRAMES)
+        frames = get_rgb_frames(file,
+                                video_len,
+                                ensure_frames_len=None if constant_fps else FRAMES,
+                                video_fps=self.constants.VIDEO_FPS if constant_fps else None)
+        # if constant_fps:
+        #     s1_frames, s2_frames = frames
+
+        #     snippet1_frames = [
+        #         self.rgb_transform(
+        #             Image.open(io.BytesIO(vid_frame))            
+        #         ) for vid_frame in s1_frames]
+
+        #     snippet2_frames = [
+        #         self.rgb_transform(
+        #             Image.open(io.BytesIO(vid_frame))            
+        #         ) for vid_frame in s2_frames]
+        #     s1_stacked_frames = np.stack(snippet1_frames, axis=0).unsqueeze(0)
+        #     s2_stacked_frames = np.stack(snippet2_frames, axis=0).unsqueeze(0)
+        #     stacked_frames = torch.cat((s1_stacked_frames, s2_stacked_frames))
+        # else:
         tensor_frames = [
             self.rgb_transform(
                 Image.open(io.BytesIO(vid_frame))            
@@ -136,8 +190,19 @@ class Tokenizer:
             save_video_frames_tensors(stacked_frames, f"{pfile.stem}")
         return stacked_frames
 
-    def make_mfcc_input(self, file: str, sampling_rate: int) -> np.ndarray:
-        audio, sr = librosa.load(file, sr=sampling_rate, duration=self.constants.MAX_AUDIO_TIME_SEC)
+    def bytes_list_to_tensor(self, bytes_list):
+        tensor_frames = [
+            self.rgb_transform(
+                Image.open(io.BytesIO(vid_frame))            
+            ) for vid_frame in bytes_list]
+        stacked_frames = torch.stack(tensor_frames, axis=0)
+        return stacked_frames
+        
+    def make_mfcc_input(self, file: str, sampling_rate: int, audio_offset: int=0, duration: float=None) -> np.ndarray:
+        if duration is None: duration = self.constants.MAX_AUDIO_TIME_SEC
+        torchaudio.load
+
+        audio, sr = librosa.load(file, sr=sampling_rate, offset=audio_offset, duration=duration)
         assert sampling_rate == sr, f"Sampling rate from file {sr} did not match settings sampling rate {sampling_rate}"
         w_len = int(sampling_rate / 1000 * self.constants.SPEC_WINDOW_SZ_MS)
         h_len = int(sampling_rate / 1000 * self.constants.SPEC_HOP_LEN_MS)
@@ -158,11 +223,25 @@ class Tokenizer:
         return -S
 
     def make_input(self, file: str, video_len: float, sampling_rate: int, constant_fps: bool=False):
-        rgb_norm, spec_norm = normalize(np.array(self.make_rgb_input(file, video_len, constant_fps))), normalize(self.make_mfcc_input(file, sampling_rate))
-        return torch.from_numpy(rgb_norm).float(), torch.from_numpy(spec_norm).float()
+        if constant_fps:
+            all_video_frames = self.make_rgb_input(file, video_len, constant_fps)
+            all_audio_samples = make_audio_input(file)
+            vid_norm = normalize(torch.tensor(all_video_frames))
+            return vid_norm.float(), all_audio_samples.float()
+        else:
+            rgb_norm, spec_norm = normalize(np.array(self.make_rgb_input(file, video_len, constant_fps))), normalize(self.make_mfcc_input(file, sampling_rate))
+            return torch.from_numpy(rgb_norm).float(), torch.from_numpy(spec_norm).float()
     
 
 if __name__ == '__main__':
+    cl = 16
+    N = 80
+    sc = None
+    for x in range(500):
+        start, end = sc.get_clip_start_frames()
+        assert ((start + cl) <= end) and ((end + cl) < N), f"{start}, {end}: clips collide with each other or are out of bounds!"
+    print(start, end, "... all ok.")
+    exit()
     from datasets import enterface
     t = Tokenizer(enterface)
     output = t.make_rgb_input(f"{enterface.DATA_DIR}/subject 33/anger/sentence 2/s33_an_2.avi", 0, True)
