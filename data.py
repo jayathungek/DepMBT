@@ -12,10 +12,11 @@ from tqdm import tqdm
 from torch.utils.data import Dataset, DataLoader, random_split
 from torch.nn.utils.rnn import pad_sequence
 import torch.nn as nn
-from torchvision import transforms
+from torchvision import transforms as vtrans
+from torchaudio import transforms as atrans
 
 
-from tokenizer import Tokenizer
+from tokenizer import Tokenizer, get_clip_start_frames
 from multicrop import MultiCrop
 from constants import *
 
@@ -29,31 +30,6 @@ video_augmentations = nn.Sequential(
     #grayscale -> {0, 1} 1 weighted 20%
     #gaussian blur
 )
-
-
-#TODO: write tests for this
-class SampleClips(nn.Module):
-    def __init__(self, total_frames, clip_length, height, width):
-        super().__init__()
-        self.total_frames = total_frames
-        self.clip_length = clip_length
-        self.height = height
-        self.width = width
-
-    def get_clip_start_frames(self):
-        max_dist = self.total_frames - (2 * self.clip_length)
-        frames = np.arange(max_dist, dtype=float)
-        probs = frames/frames.sum()
-        probs = -probs + probs[-1]
-        dist = np.random.choice(frames, 1, p = probs)[0]
-        s1_choices = np.arange(0, self.total_frames - (2 * self.clip_length) - dist) 
-        s1 = np.random.choice(s1_choices, 1)[0]
-        s2 = s1 + self.clip_length + dist
-        return int(s1), int(s2)
-
-    def forward(self, batch):
-        pass
-
 
 
 class EmoDataset(Dataset):
@@ -98,7 +74,7 @@ class Collate_Multicrop:
         self.dataset_constants = dataset_namespace
         self.force_audio_shape = force_audio_aspect
         self.tokenizer = Tokenizer(dataset_namespace)
-        self.audio_transform = transforms.Resize((HEIGHT, WIDTH))
+        self.audio_transform = vtrans.Resize((HEIGHT, WIDTH))
         self.multicrop_rgb = MultiCrop(image_size=(HEIGHT, WIDTH), num_global_views=NUM_GLOBAL_VIEWS, num_local_views=NUM_LOCAL_VIEWS, global_view_pct=GLOBAL_VIEW_PCT, local_view_pct=LOCAL_VIEW_PCT)
         image_sz = (HEIGHT, WIDTH) if self.force_audio_shape else (NUM_MELS, self.dataset_constants.MAX_SPEC_SEQ_LEN)
         self.multicrop_spec = MultiCrop(image_size=image_sz, num_global_views=NUM_GLOBAL_VIEWS, num_local_views=NUM_LOCAL_VIEWS, global_view_pct=GLOBAL_VIEW_PCT, local_view_pct=LOCAL_VIEW_PCT)
@@ -150,7 +126,118 @@ class Collate_Multicrop:
         } 
 
 
-def load_data(dataset_const_namespace, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1], nlines=None, se=None, seed=None, force_audio_aspect=False):
+def frame_to_audio_sample(frame: int, fps: int, audio_sr: int) -> int:
+    timestamp = frame * (1 / fps)
+    sample = int(audio_sr * timestamp)
+    return sample
+
+
+class Collate_Constrastive:
+    def __init__(self, dataset_namespace: ModuleType, force_audio_aspect=False):
+        """
+        force_audio_aspect: force resize of audio spectrogram to video shape
+        """
+        self.dataset_constants = dataset_namespace
+        self.force_audio_shape = force_audio_aspect
+        self.tokenizer = Tokenizer(dataset_namespace)
+        self.audio_transform = nn.Sequential(
+            atrans.MelSpectrogram(
+                sample_rate=self.dataset_constants.SAMPLING_RATE,
+                n_fft=1024,
+                n_mels=128,
+                win_length=None,
+                hop_length=512,
+            ),
+            atrans.AmplitudeToDB(),
+            vtrans.Resize((HEIGHT, WIDTH)) if self.force_audio_shape else nn.Identity()
+        )
+
+    def __call__(self, batch):
+        
+        if self.force_audio_shape:
+            spec_batch_tensor1 = torch.FloatTensor(len(batch), CHANS, HEIGHT, WIDTH)
+            spec_batch_tensor2 = torch.FloatTensor(len(batch), CHANS, HEIGHT, WIDTH)
+        else:
+            spec_batch_tensor1 = torch.FloatTensor(len(batch), CHANS, NUM_MELS, self.dataset_constants.MAX_SPEC_SEQ_LEN)
+            spec_batch_tensor2 = torch.FloatTensor(len(batch), CHANS, NUM_MELS, self.dataset_constants.MAX_SPEC_SEQ_LEN)
+        rgb_batch_tensor1 = torch.FloatTensor(len(batch), FRAMES, CHANS, HEIGHT, WIDTH)
+        rgb_batch_tensor2 = torch.FloatTensor(len(batch), FRAMES, CHANS, HEIGHT, WIDTH)
+        label_batch_tensor = torch.LongTensor(len(batch), self.dataset_constants.NUM_LABELS)
+        frames_count_batch_tensor = torch.LongTensor(len(batch))
+        rgb_tensor_list1 = []
+        rgb_tensor_list2 = []
+        spec_tensor_list1 = []
+        spec_tensor_list2 = []
+        label_list = []
+        for filename, duration, frames_count, label in batch:
+            start1, start2 = get_clip_start_frames(frames_count, FRAMES)
+            end1, end2 = start1 + FRAMES, start2 + FRAMES
+            rgb_frames, audio_samples = self.tokenizer.make_input(filename, float(duration), self.dataset_constants.SAMPLING_RATE, constant_fps=True)
+            rgb1 = rgb_frames[start1 : end1]
+            rgb2 = rgb_frames[start2 : end2]
+
+            sample_start1 = frame_to_audio_sample(start1, self.dataset_constants.VIDEO_FPS, self.dataset_constants.SAMPLING_RATE)
+            sample_start2 = frame_to_audio_sample(start2, self.dataset_constants.VIDEO_FPS, self.dataset_constants.SAMPLING_RATE)
+            sample_end1 = frame_to_audio_sample(end1, self.dataset_constants.VIDEO_FPS, self.dataset_constants.SAMPLING_RATE)
+            sample_end2 = frame_to_audio_sample(end2, self.dataset_constants.VIDEO_FPS, self.dataset_constants.SAMPLING_RATE)
+            audio1 = audio_samples[sample_start1: sample_end1]
+            audio2 = audio_samples[sample_start2: sample_end2]
+
+            spec1 = self.audio_transform(audio1.unsqueeze(0)).unsqueeze(0).repeat(1, 3, 1, 1)
+            spec1_tmp = spec1 + abs(spec1.min())
+            spec1_norm = spec1_tmp / spec1_tmp.max()
+            spec2 = self.audio_transform(audio2.unsqueeze(0)).unsqueeze(0).repeat(1, 3, 1, 1)
+            spec2_tmp = spec2 + abs(spec2.min())
+            spec2_norm = spec2_tmp / spec2_tmp.max()
+
+
+            label = torch.tensor([label], dtype=torch.long).unsqueeze(0)
+            rgb_tensor_list1.append(rgb1.unsqueeze(0))
+            rgb_tensor_list2.append(rgb2.unsqueeze(0))
+            spec_tensor_list1.append(spec1_norm)
+            spec_tensor_list2.append(spec2_norm)
+            label_list.append(label)
+
+
+        torch.cat(label_list, out=label_batch_tensor)
+        torch.cat(rgb_tensor_list1, out=rgb_batch_tensor1)
+        torch.cat(rgb_tensor_list2, out=rgb_batch_tensor2)
+        torch.cat(spec_tensor_list1, out=spec_batch_tensor1)
+        torch.cat(spec_tensor_list2, out=spec_batch_tensor2)
+        if not self.force_audio_shape:
+            padding = (0, 0, 0, self.dataset_constants.MAX_SPEC_SEQ_LEN - spec_tensor_list1[0].shape[0])
+            padding = (0, 0, 0, self.dataset_constants.MAX_SPEC_SEQ_LEN - spec_tensor_list1[0].shape[0])
+            spec_tensor_list1[0] = nn.ConstantPad2d(padding, 0)(spec_tensor_list1[0])
+            spec_tensor_list2[0] = nn.ConstantPad2d(padding, 0)(spec_tensor_list2[0])
+            spec_batch_tensor1 = pad_sequence(spec_tensor_list1, batch_first=True)
+            spec_batch_tensor2 = pad_sequence(spec_tensor_list2, batch_first=True)
+            spec_batch_tensor1 = spec_batch_tensor1.swapaxes(1, 2)
+            spec_batch_tensor2 = spec_batch_tensor2.swapaxes(1, 2)
+            spec_batch_tensor1 = spec_batch_tensor1.unsqueeze(1).repeat(1, 3, 1, 1)
+            spec_batch_tensor2 = spec_batch_tensor2.unsqueeze(1).repeat(1, 3, 1, 1)
+        # else:
+            # torch.cat(
+            #     [self.audio_transform(s.unsqueeze(0)) for s in spec_tensor_list1],
+            #     dim=0,
+            #     out=spec_batch_tensor1
+            # )
+            # torch.cat(
+            #     [self.audio_transform(s.unsqueeze(0)) for s in spec_tensor_list2],
+            #     dim=0,
+            #     out=spec_batch_tensor2
+            # )
+            # spec_batch_tensor1 = spec_batch_tensor1.repeat(1, 3, 1, 1)
+            # spec_batch_tensor2 = spec_batch_tensor2.repeat(1, 3, 1, 1)
+
+        return {
+            "rgb_clip1": rgb_batch_tensor1,
+            "rgb_clip2": rgb_batch_tensor2,
+            "spec_clip1": spec_batch_tensor1,
+            "spec_clip2": spec_batch_tensor2,
+            "labels": label_batch_tensor
+        } 
+
+def load_data(dataset_const_namespace, collate_func, batch_sz=16, train_val_test_split=[0.8, 0.1, 0.1], nlines=None, se=None, seed=None, force_audio_aspect=False):
     # This is a convenience funtion that returns dataset splits of train, val and test according to the fractions specified in the arguments
     assert sum(train_val_test_split) == 1, "Train, val and test fractions should sum to 1!"  # Always a good idea to use static asserts when processing arguments that are passed in by a user!
     dataset = EmoDataset(dataset_const_namespace, nlines=nlines, sole_emotion=se)
@@ -178,12 +265,11 @@ def load_data(dataset_const_namespace, batch_sz=16, train_val_test_split=[0.8, 0
     
     # Use Pytorch DataLoader to load each split into memory. It's important to pass in our custom collate function, so it knows how to interpret the 
     # data and load it. num_workers tells the DataLoader how many CPU threads to use so that data can be loaded in parallel, which is faster
-    new_collate_fn = Collate_Multicrop(dataset_const_namespace, force_audio_aspect=force_audio_aspect)
     if len(train_split) > 0:
         train_dl = DataLoader(train_split, 
                             batch_size=batch_sz, 
                             shuffle=True, 
-                            collate_fn=new_collate_fn)            
+                            collate_fn=collate_func)            
     else:
         train_dl = None
 
@@ -191,7 +277,7 @@ def load_data(dataset_const_namespace, batch_sz=16, train_val_test_split=[0.8, 0
         val_dl = DataLoader(val_split, 
                             batch_size=batch_sz, 
                             shuffle=True, 
-                            collate_fn=new_collate_fn)
+                            collate_fn=collate_func)
     else:
         val_dl = None
 
@@ -199,7 +285,7 @@ def load_data(dataset_const_namespace, batch_sz=16, train_val_test_split=[0.8, 0
         test_dl = DataLoader(test_split,
                             batch_size=batch_sz,
                             shuffle=False,
-                            collate_fn=new_collate_fn)
+                            collate_fn=collate_func)
     else:
         test_dl = None
 
@@ -244,14 +330,6 @@ def gen_dataset(rate, keep):
             pickle.dump(dataset[fold], handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 if __name__=="__main__":
-    cl = 16
-    N = 80
-    sc = SampleClips(N, cl, 224, 224)
-    for x in range(500):
-        start, end = sc.get_clip_start_frames()
-        assert ((start + cl) <= end) and ((end + cl) < N), f"{start}, {end}: clips collide with each other or are out of bounds!"
-    print(start, end, "... all ok.")
-    exit()
     from datasets import enterface
     from tokenizer import save_video_frames_tensors
 
