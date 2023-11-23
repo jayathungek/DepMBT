@@ -17,7 +17,7 @@ MAX_AUDIO_TIME_SEC = 5
 DATA_DIR = "/root/intelpa-1/datasets/enterface database"
 FACE_MARGIN = 100
 DATA_EXT = "avi"
-FPS = 5
+VIDEO_FPS = 25
 
 
 # first 2 items in tuple is filepath, length(s), rest are labels
