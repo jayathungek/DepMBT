@@ -217,10 +217,8 @@ class Collate_Constrastive:
             spec_batch_tensor2 = spec_batch_tensor2.unsqueeze(1).repeat(1, 3, 1, 1)
 
         return {
-            "rgb_clip1": rgb_batch_tensor1,
-            "rgb_clip2": rgb_batch_tensor2,
-            "spec_clip1": spec_batch_tensor1,
-            "spec_clip2": spec_batch_tensor2,
+            "clip0": (rgb_batch_tensor1, spec_batch_tensor1),
+            "clip1": (rgb_batch_tensor2, spec_batch_tensor2),
             "labels": label_batch_tensor
         } 
 

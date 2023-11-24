@@ -234,6 +234,35 @@ def train_multicrop(teacher_net, student_net, trainldr, optimizer, centre, loss_
     return total_losses.avg(), centre
         
 
+def train_contrastive(network, trainldr, optimizer, loss_fn):
+    total_losses = AverageMeter()
+    network.train()
+    for data in tqdm(trainldr):
+        labels = data["labels"]
+        # positive pair
+        clip0_0_rgb, clip0_0_spec = data["clip0"]
+        clip1_0_rgb, clip1_0_spec = data["clip1"]
+        rgb_shape = clip0_0_rgb.shape
+        spec_shape = clip0_0_spec.shape
+
+        #negative pair
+        clip0_1_rgb, clip0_1_spec = clip0_0_rgb.view(rgb_shape).roll(ROLL_N, dims=0), \
+                                    clip0_0_spec.view(spec_shape).roll(ROLL_N, dims=0)
+        clip1_1_rgb, clip1_1_spec = clip1_0_rgb.view(rgb_shape).roll(ROLL_N, dims=0), \
+                                    clip1_0_spec.view(spec_shape).roll(ROLL_N, dims=0)
+
+        clip0_0 = network(clip0_0_spec, clip0_0_rgb)
+        clip0_1 = network(clip0_1_spec, clip0_1_rgb)
+        clip1_0 = network(clip1_0_spec, clip1_0_rgb)
+        clip1_1 = network(clip1_1_spec, clip1_1_rgb)
+
+        loss = loss_fn(clip0_0, clip0_1, clip1_0, clip1_1)
+        loss.backward()
+        optimizer.step()
+        total_losses.update(loss.data.item(), rgb_shape[0])
+    return total_losses.avg()
+    
+
 if __name__ == "__main__":
     from datasets import enterface
 
